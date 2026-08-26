@@ -11,7 +11,7 @@ class ASTNode:
 
 @dataclass(slots=True)
 class NumberNode(ASTNode):
-    value: int
+    value: int | float
 
 
 @dataclass(slots=True)
@@ -31,3 +31,9 @@ class BinaryOpNode(ASTNode):
     left: ASTNode
     operator: str
     right: ASTNode
+
+
+@dataclass(slots=True)
+class PercentNode(ASTNode):
+    """후위 % (백분율) 노드 (예: 50% -> 0.5)"""
+    operand: ASTNode

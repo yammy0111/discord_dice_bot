@@ -12,6 +12,7 @@ from .nodes import (
     DiceNode,
     UnaryOpNode,
     BinaryOpNode,
+    PercentNode,
 )
 
 from .limits import (
@@ -31,7 +32,7 @@ from .errors import (
 def _op_rank(op: str | None) -> int:
     if op in ("+", "-"):
         return 1
-    if op in ("*", "/"):
+    if op in ("*", "/", "%"):
         return 2
     if op == "**":
         return 3
@@ -130,8 +131,24 @@ class Evaluator:
         if isinstance(node, BinaryOpNode):
             return self._eval_binary(node)
 
+        if isinstance(node, PercentNode):
+            return self._eval_percent(node)
+
         raise EvaluatorError(
             f"지원하지 않는 노드 타입: {type(node).__name__}"
+        )
+
+    def _eval_percent(
+        self,
+        node: PercentNode,
+    ) -> EvalResult:
+        operand = self._eval(node.operand)
+        val = operand.value / 100
+        val = round(val, 4) if isinstance(val, float) else val
+        return EvalResult(
+            value=val,
+            rendered=f"{operand.rendered}%",
+            op_type="%",
         )
 
     # -----------------
@@ -252,6 +269,11 @@ class Evaluator:
             if right.value == 0:
                 raise EvaluatorError("0으로 나눌 수 없습니다.")
             value = left.value / right.value
+
+        elif op == "%":
+            if right.value == 0:
+                raise EvaluatorError("0으로 나눌 수 없습니다.")
+            value = left.value % right.value
 
         elif op == "**":
             if abs(right.value) > MAX_POWER:

@@ -45,3 +45,18 @@ class EngineResult:
     calculation_steps: list[str]
     roll_logs: list[RollEntry]
     render_result: RenderResult
+
+
+@dataclass(slots=True)
+class DerivedResult:
+    """파생 계산 결과 (하나의 주사위 값에서 파생된 추가 계산)"""
+    formula: str
+    full_expression: str
+    value: int | float
+
+
+@dataclass(slots=True)
+class DerivedRollResult:
+    """주사위 기본 굴림 + 파생 계산 결과 묶음"""
+    base: EngineResult
+    derived: list[DerivedResult]

@@ -14,6 +14,8 @@ from .models import (
     EngineResult,
     RollEntry,
     RenderResult,
+    DerivedResult,
+    DerivedRollResult,
 )
 
 
@@ -86,3 +88,68 @@ class DiceEngine:
             results.append(self.roll(part))
 
         return results
+
+    def roll_derived(
+        self,
+        raw_expression: str,
+    ) -> DerivedRollResult:
+        """
+        '>' 구문으로 기본 주사위 굴림과 파생 계산식을 처리
+
+        예: '2d6 > +5, *2+3'
+          - 기본 굴림: 2d6 = 8
+          - 파생 1: 8+5 = 13
+          - 파생 2: 8*2+3 = 19
+        """
+        if ">" not in raw_expression:
+            raise DiceError("파생 계산에는 '>' 구분자가 필요합니다. 예: 2d6 > +5, *2+3")
+
+        parts = raw_expression.split(">", 1)
+        base_expr = parts[0].strip()
+        formulas_str = parts[1].strip()
+
+        if not base_expr:
+            raise DiceError("기본 주사위 수식이 비어있습니다.")
+
+        if not formulas_str:
+            raise DiceError("파생 계산식이 비어있습니다.")
+
+        # 기본 주사위 굴림
+        base_result = self.roll(base_expr)
+        base_value = base_result.value
+
+        # 파생 계산식 처리
+        formulas = [f.strip() for f in formulas_str.split(",") if f.strip()]
+
+        if not formulas:
+            raise DiceError("유효한 파생 계산식이 없습니다.")
+
+        if len(formulas) > MAX_EXPRESSIONS_COUNT:
+            raise LimitExceededError(
+                f"파생 계산식 제한 ({MAX_EXPRESSIONS_COUNT}개 초과)"
+            )
+
+        derived_results = []
+        for formula in formulas:
+            # 기본 값을 수식 앞에 붙여 완전한 수식을 만듦
+            # 예: base=8, formula="+5" → "8+5"
+            # 예: base=8, formula="*2+3" → "8*2+3"
+            full_expr = f"{base_value}{formula}"
+            try:
+                result = self.roll(full_expr)
+                derived_results.append(
+                    DerivedResult(
+                        formula=formula,
+                        full_expression=full_expr,
+                        value=result.value,
+                    )
+                )
+            except DiceError as e:
+                raise DiceError(
+                    f"파생 계산식 '{formula}' 오류: {e}"
+                )
+
+        return DerivedRollResult(
+            base=base_result,
+            derived=derived_results,
+        )

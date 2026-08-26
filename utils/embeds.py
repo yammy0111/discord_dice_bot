@@ -6,7 +6,7 @@ import discord
 from typing import TYPE_CHECKING, Union, List
 
 if TYPE_CHECKING:
-    from dice.engine import EngineResult
+    from dice.models import EngineResult, DerivedRollResult
 
 
 def build_dice_embed(

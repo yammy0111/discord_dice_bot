@@ -16,6 +16,7 @@ class TokenType(Enum):
 
     MUL = auto()
     DIV = auto()
+    PERCENT = auto()  # %
 
     POW = auto()
 
@@ -125,6 +126,10 @@ class Tokenizer:
         if ch == "/":
             self.advance()
             return Token(TokenType.DIV, "/", start)
+
+        if ch == "%":
+            self.advance()
+            return Token(TokenType.PERCENT, "%", start)
 
         if ch == "(":
             self.advance()

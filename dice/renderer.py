@@ -10,6 +10,7 @@ from .nodes import (
     DiceNode,
     UnaryOpNode,
     BinaryOpNode,
+    PercentNode,
 )
 from .tokenizer import Tokenizer
 from .parser import Parser
@@ -121,6 +122,15 @@ class Renderer:
                 changed,
             )
 
+        if isinstance(node, PercentNode):
+            if isinstance(node.operand, NumberNode):
+                val = node.operand.value / 100
+                val = round(val, 4) if isinstance(val, float) else val
+                return NumberNode(val), True
+
+            new_operand, changed = self._find_and_reduce(node.operand)
+            return PercentNode(new_operand), changed
+
         return node, False
 
     # --------------------
@@ -149,6 +159,11 @@ class Renderer:
             val = left / right
             return round(val, 2) if isinstance(val, float) else val
 
+        if op == "%":
+            if right == 0:
+                return 0
+            return left % right
+
         if op == "**":
             return left ** right
 
@@ -175,5 +190,8 @@ class Renderer:
             right_str = self._to_string(node.right)
             right_op = node.right.operator if isinstance(node.right, BinaryOpNode) else None
             return format_op(left_str, left_op, node.operator, right_str, right_op)
+
+        if isinstance(node, PercentNode):
+            return self._to_string(node.operand) + "%"
 
         return str(node)

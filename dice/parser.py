@@ -8,14 +8,13 @@ from .nodes import (
     DiceNode,
     UnaryOpNode,
     BinaryOpNode,
+    PercentNode,
 )
 
 from .tokenizer import (
     Token,
     TokenType,
 )
-
-
 from .errors import ParserError
 
 
@@ -42,8 +41,7 @@ class Parser:
 
         if token.type != expected:
             raise ParserError(
-                f"예상: {expected.name}, "
-                f"실제: {token.type.name}"
+                f"예상: {expected.name}, 실제: {token.type.name}"
             )
 
         self.advance()
@@ -139,63 +137,55 @@ class Parser:
 
         token = self.current
 
-        #
         # ( expression )
-        #
         if token.type == TokenType.LPAREN:
-
             self.advance()
-
             node = self.expression()
-
             self.consume(TokenType.RPAREN)
 
-            return node
-
-        #
-        # number or dice
-        #
-        if token.type == TokenType.NUMBER:
-
+        elif token.type == TokenType.NUMBER:
             first = int(token.value)
-
             self.advance()
 
-            #
-            # NdM
-            #
+            # NdM or Nd%
             if self.current.type == TokenType.D:
-
                 self.advance()
 
-                sides_token = self.consume(
-                    TokenType.NUMBER
-                )
+                if self.current.type == TokenType.PERCENT:
+                    self.advance()
+                    node = DiceNode(count=first, sides=100)
+                else:
+                    sides_token = self.consume(TokenType.NUMBER)
+                    node = DiceNode(
+                        count=first,
+                        sides=int(sides_token.value),
+                    )
+            else:
+                node = NumberNode(first)
 
-                return DiceNode(
-                    count=first,
-                    sides=int(sides_token.value),
-                )
-
-            return NumberNode(first)
-
-        #
-        # d20
-        #
-        if token.type == TokenType.D:
-
+        # d20 or d%
+        elif token.type == TokenType.D:
             self.advance()
 
-            sides_token = self.consume(
-                TokenType.NUMBER
+            if self.current.type == TokenType.PERCENT:
+                self.advance()
+                node = DiceNode(count=1, sides=100)
+            else:
+                sides_token = self.consume(TokenType.NUMBER)
+                node = DiceNode(
+                    count=1,
+                    sides=int(sides_token.value),
+                )
+        else:
+            raise ParserError(
+                f"예상치 못한 토큰: {token.type.name}"
             )
 
-            return DiceNode(
-                count=1,
-                sides=int(sides_token.value),
-            )
+        # 후위 % (백분율) 연산자 처리
+        while self.current.type == TokenType.PERCENT:
+            self.advance()
+            node = PercentNode(operand=node)
 
-        raise ParserError(
-            f"예상치 못한 토큰: "
-            f"{token.type.name}"
-        )
+        
+
+        return node
