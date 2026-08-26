@@ -14,9 +14,10 @@ def build_derived_dice_embed(
     user: discord.User | discord.Member,
     show_detail: bool = False,
 ) -> discord.Embed:
-    """기본 굴림 하나에서 여러 파생 계산을 만든 결과 Embed 생성"""
+    """기본 굴림 하나에서 여러 단계의 파생 계산을 만든 결과 Embed 생성"""
+    max_field_length = 1000
     embed = discord.Embed(
-        title="파생 굴림 결과",
+        title="다중 파생 굴림 결과",
         color=discord.Color.blurple(),
     )
 
@@ -37,7 +38,7 @@ def build_derived_dice_embed(
 
         if detail_lines:
             logs_text = "\n".join(detail_lines)
-            if len(logs_text) > 1000:
+            if len(logs_text) > max_field_length:
                 logs_text = logs_text[:997] + "..."
             embed.add_field(
                 name="기본 주사위 결과",
@@ -52,20 +53,37 @@ def build_derived_dice_embed(
                 inline=False,
             )
 
-    for idx, derived in enumerate(result.derived, 1):
+    current_level = None
+    index_in_level = 0
+    for derived in result.derived:
+        if derived.level != current_level:
+            current_level = derived.level
+            index_in_level = 1
+        else:
+            index_in_level += 1
+
+        source_text = derived.source_label
+        if derived.source_value is not None:
+            source_text = f"{source_text} `{derived.source_value}`"
+
         lines = [
+            f"기준: {source_text}",
             f"계산: `{derived.full_expression}`",
             f"결과: **`{derived.value}`**",
         ]
         if show_detail and derived.calculation_steps:
             steps_text = " -> ".join(f"`{s}`" for s in derived.calculation_steps)
-            if len(steps_text) > 500:
-                steps_text = steps_text[:497] + "..."
+            if len(steps_text) > 450:
+                steps_text = steps_text[:447] + "..."
             lines.append(f"풀이: {steps_text}")
 
+        field_value = "\n".join(lines)
+        if len(field_value) > max_field_length:
+            field_value = field_value[:997] + "..."
+
         embed.add_field(
-            name=f"파생 #{idx} `{derived.formula}`",
-            value="\n".join(lines),
+            name=f"{derived.level}차 파생 #{index_in_level} `{derived.formula}`",
+            value=field_value,
             inline=False,
         )
 
@@ -74,7 +92,6 @@ def build_derived_dice_embed(
         icon_url=user.display_avatar.url if user.display_avatar else None,
     )
     return embed
-
 
 def build_dice_embed(
     results: Union[EngineResult, List[EngineResult]],

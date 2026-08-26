@@ -92,62 +92,76 @@ class DiceEngine:
         raw_expression: str,
     ) -> DerivedRollResult:
         """
-        '>' 구문으로 기본 주사위 굴림과 파생 계산식을 처리
+        '>' 구문으로 기본 주사위 굴림과 단계별 파생 계산식을 처리
 
-        예: '2d6 > +5, *2+3'
+        예: '2d6 > +5, *2+3 > -1'
           - 기본 굴림: 2d6 = 8
-          - 파생 1: 8+5 = 13
-          - 파생 2: 8*2+3 = 19
+          - 1차 파생: 8+5 = 13, 8*2+3 = 19
+          - 2차 파생: 13-1 = 12, 19-1 = 18
         """
         if ">" not in raw_expression:
             raise DiceError("파생 계산에는 '>' 구분자가 필요합니다. 예: 2d6 > +5, *2+3")
 
-        parts = raw_expression.split(">", 1)
-        base_expr = parts[0].strip()
-        formulas_str = parts[1].strip()
+        sections = [section.strip() for section in raw_expression.split(">")]
+        base_expr = sections[0]
+        derived_sections = sections[1:]
 
         if not base_expr:
             raise DiceError("기본 주사위 수식이 비어있습니다.")
 
-        if not formulas_str:
+        if not derived_sections or any(not section for section in derived_sections):
             raise DiceError("파생 계산식이 비어있습니다.")
 
-        # 기본 주사위 굴림
         base_result = self.roll(base_expr)
-        base_value = base_result.value
+        current_values: list[tuple[int | float, str]] = [
+            (base_result.value, "기본")
+        ]
+        derived_results: list[DerivedResult] = []
 
-        # 파생 계산식 처리
-        formulas = [f.strip() for f in formulas_str.split(",") if f.strip()]
+        for level, formulas_str in enumerate(derived_sections, 1):
+            formulas = [f.strip() for f in formulas_str.split(",") if f.strip()]
 
-        if not formulas:
-            raise DiceError("유효한 파생 계산식이 없습니다.")
+            if not formulas:
+                raise DiceError(f"{level}차 파생에 유효한 계산식이 없습니다.")
 
-        if len(formulas) > MAX_EXPRESSIONS_COUNT:
-            raise LimitExceededError(
-                f"파생 계산식 제한 ({MAX_EXPRESSIONS_COUNT}개 초과)"
-            )
+            if len(formulas) > MAX_EXPRESSIONS_COUNT:
+                raise LimitExceededError(
+                    f"{level}차 파생 계산식 제한 ({MAX_EXPRESSIONS_COUNT}개 초과)"
+                )
 
-        derived_results = []
-        for formula in formulas:
-            # 기본 값을 수식 앞에 붙여 완전한 수식을 만듦
-            # 예: base=8, formula="+5" → "8+5"
-            # 예: base=8, formula="*2+3" → "8*2+3"
-            full_expr = f"{base_value}{formula}"
-            try:
-                result = self.roll(full_expr)
-                derived_results.append(
-                    DerivedResult(
-                        formula=formula,
-                        full_expression=full_expr,
-                        value=result.value,
-                        substituted_expression=result.substituted_expression,
-                        calculation_steps=result.calculation_steps,
+            next_values: list[tuple[int | float, str]] = []
+
+            for source_value, source_label in current_values:
+                for formula in formulas:
+                    full_expr = f"{source_value}{formula}"
+                    try:
+                        result = self.roll(full_expr)
+                    except DiceError as e:
+                        raise DiceError(
+                            f"{level}차 파생 계산식 '{formula}' 오류: {e}"
+                        )
+
+                    index_in_level = len(next_values) + 1
+                    derived_results.append(
+                        DerivedResult(
+                            formula=formula,
+                            full_expression=full_expr,
+                            value=result.value,
+                            substituted_expression=result.substituted_expression,
+                            calculation_steps=result.calculation_steps,
+                            level=level,
+                            source_label=source_label,
+                            source_value=source_value,
+                        )
                     )
-                )
-            except DiceError as e:
-                raise DiceError(
-                    f"파생 계산식 '{formula}' 오류: {e}"
-                )
+                    next_values.append((result.value, f"{level}차 #{index_in_level}"))
+
+                    if len(next_values) > MAX_EXPRESSIONS_COUNT:
+                        raise LimitExceededError(
+                            f"{level}차 파생 결과 제한 ({MAX_EXPRESSIONS_COUNT}개 초과)"
+                        )
+
+            current_values = next_values
 
         return DerivedRollResult(
             base=base_result,

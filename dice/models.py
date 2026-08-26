@@ -55,6 +55,9 @@ class DerivedResult:
     value: int | float
     substituted_expression: str
     calculation_steps: list[str]
+    level: int = 1
+    source_label: str = "기본"
+    source_value: int | float | None = None
 
 
 @dataclass(slots=True)
