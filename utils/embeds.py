@@ -9,6 +9,73 @@ if TYPE_CHECKING:
     from dice.models import EngineResult, DerivedRollResult
 
 
+def build_derived_dice_embed(
+    result: DerivedRollResult,
+    user: discord.User | discord.Member,
+    show_detail: bool = False,
+) -> discord.Embed:
+    """기본 굴림 하나에서 여러 파생 계산을 만든 결과 Embed 생성"""
+    embed = discord.Embed(
+        title="파생 굴림 결과",
+        color=discord.Color.blurple(),
+    )
+
+    base = result.base
+    embed.add_field(
+        name="기본 굴림",
+        value=f"`{base.expression}` -> **`{base.value}`**",
+        inline=False,
+    )
+
+    if show_detail:
+        detail_lines = []
+        for entry in base.roll_logs:
+            rolls_str = ", ".join(map(str, entry.rolls))
+            if len(rolls_str) > 100:
+                rolls_str = rolls_str[:97] + "..."
+            detail_lines.append(f"`{entry.expression}`: [{rolls_str}] (합: {entry.total})")
+
+        if detail_lines:
+            logs_text = "\n".join(detail_lines)
+            if len(logs_text) > 1000:
+                logs_text = logs_text[:997] + "..."
+            embed.add_field(
+                name="기본 주사위 결과",
+                value=logs_text,
+                inline=False,
+            )
+
+        if base.substituted_expression != base.expression:
+            embed.add_field(
+                name="기본 치환 수식",
+                value=f"`{base.substituted_expression}`",
+                inline=False,
+            )
+
+    for idx, derived in enumerate(result.derived, 1):
+        lines = [
+            f"계산: `{derived.full_expression}`",
+            f"결과: **`{derived.value}`**",
+        ]
+        if show_detail and derived.calculation_steps:
+            steps_text = " -> ".join(f"`{s}`" for s in derived.calculation_steps)
+            if len(steps_text) > 500:
+                steps_text = steps_text[:497] + "..."
+            lines.append(f"풀이: {steps_text}")
+
+        embed.add_field(
+            name=f"파생 #{idx} `{derived.formula}`",
+            value="\n".join(lines),
+            inline=False,
+        )
+
+    embed.set_footer(
+        text=f"요청자: {user.display_name}",
+        icon_url=user.display_avatar.url if user.display_avatar else None,
+    )
+    return embed
+
+
 def build_dice_embed(
     results: Union[EngineResult, List[EngineResult]],
     user: discord.User | discord.Member,

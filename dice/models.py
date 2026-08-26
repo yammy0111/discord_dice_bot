@@ -53,6 +53,8 @@ class DerivedResult:
     formula: str
     full_expression: str
     value: int | float
+    substituted_expression: str
+    calculation_steps: list[str]
 
 
 @dataclass(slots=True)

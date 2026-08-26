@@ -8,7 +8,7 @@ from discord.ext import commands
 
 from dice.engine import DiceEngine
 from dice.errors import DiceError
-from utils.embeds import build_dice_embed, build_error_embed
+from utils.embeds import build_dice_embed, build_derived_dice_embed, build_error_embed
 
 
 class DiceCog(commands.Cog):
@@ -27,8 +27,16 @@ class DiceCog(commands.Cog):
     ) -> None:
         """주사위 굴리기 내부 헬퍼 메서드"""
         try:
-            results = self.engine.roll_multiple(expression)
-            embed = build_dice_embed(results, interaction.user, show_detail=detail)
+            if ">" in expression:
+                results = self.engine.roll_derived(expression)
+                embed = build_derived_dice_embed(
+                    results,
+                    interaction.user,
+                    show_detail=detail,
+                )
+            else:
+                results = self.engine.roll_multiple(expression)
+                embed = build_dice_embed(results, interaction.user, show_detail=detail)
             await interaction.response.send_message(
                 embed=embed,
                 ephemeral=secret,

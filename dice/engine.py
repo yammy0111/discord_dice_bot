@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from .tokenizer import Tokenizer
 from .parser import Parser
 from .evaluator import Evaluator
@@ -142,6 +140,8 @@ class DiceEngine:
                         formula=formula,
                         full_expression=full_expr,
                         value=result.value,
+                        substituted_expression=result.substituted_expression,
+                        calculation_steps=result.calculation_steps,
                     )
                 )
             except DiceError as e:
