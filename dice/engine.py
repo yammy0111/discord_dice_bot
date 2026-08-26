@@ -6,30 +6,15 @@ from dataclasses import dataclass
 
 from .tokenizer import Tokenizer
 from .parser import Parser
-from .evaluator import (
-    Evaluator,
-    RollEntry,
-)
-from .renderer import (
-    Renderer,
-    RenderResult,
-)
+from .evaluator import Evaluator
+from .renderer import Renderer
 from .limits import MAX_EXPRESSIONS_COUNT
 from .errors import DiceError, LimitExceededError
-
-
-@dataclass(slots=True)
-class EngineResult:
-    """
-    Discord Cog에서 사용할 최종 결과
-    """
-
-    expression: str
-    value: int | float
-    substituted_expression: str
-    calculation_steps: list[str]
-    roll_logs: list[RollEntry]
-    render_result: RenderResult
+from .models import (
+    EngineResult,
+    RollEntry,
+    RenderResult,
+)
 
 
 class DiceEngine:

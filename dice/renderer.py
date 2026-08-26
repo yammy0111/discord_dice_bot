@@ -16,11 +16,7 @@ from .parser import Parser
 from .evaluator import format_op
 
 
-@dataclass(slots=True)
-class RenderResult:
-    substituted: str
-    steps: list[str]
-    result: str
+from .models import RenderResult
 
 
 class Renderer:

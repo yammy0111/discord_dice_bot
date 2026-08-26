@@ -67,24 +67,11 @@ def format_op(
     return f"{left_str}{op}{right_str}"
 
 
-@dataclass(slots=True)
-class RollEntry:
-    expression: str
-    rolls: list[int]
-    total: int
-
-
-@dataclass(slots=True)
-class EvalResult:
-    value: int | float
-    rendered: str
-    op_type: str | None = None
-
-
-@dataclass(slots=True)
-class EvaluationContext:
-    roll_entries: List[RollEntry]
-    total_roll_count: int = 0
+from .models import (
+    RollEntry,
+    EvalResult,
+    EvaluationContext,
+)
 
 
 class Evaluator:
