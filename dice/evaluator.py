@@ -28,6 +28,45 @@ from .errors import (
 )
 
 
+def _op_rank(op: str | None) -> int:
+    if op in ("+", "-"):
+        return 1
+    if op in ("*", "/"):
+        return 2
+    if op == "**":
+        return 3
+    return 99
+
+
+def format_op(
+    left_str: str,
+    left_op: str | None,
+    op: str,
+    right_str: str,
+    right_op: str | None,
+) -> str:
+    """연산자 우선순위에 맞춰 필요한 경우에만 괄호를 추가하는 헬퍼 함수"""
+    parent_rank = _op_rank(op)
+
+    # 피연산자 왼쪽
+    if left_op and _op_rank(left_op) < parent_rank:
+        left_str = f"({left_str})"
+
+    # 피연산자 오른쪽
+    if right_op:
+        right_rank = _op_rank(right_op)
+        if right_rank < parent_rank:
+            right_str = f"({right_str})"
+        elif parent_rank == 1 and op == "-" and right_op in ("+", "-"):
+            right_str = f"({right_str})"
+        elif parent_rank == 2 and op == "/" and right_op in ("*", "/"):
+            right_str = f"({right_str})"
+        elif op == "**":
+            right_str = f"({right_str})"
+
+    return f"{left_str}{op}{right_str}"
+
+
 @dataclass(slots=True)
 class RollEntry:
     expression: str
@@ -39,6 +78,7 @@ class RollEntry:
 class EvalResult:
     value: int | float
     rendered: str
+    op_type: str | None = None
 
 
 @dataclass(slots=True)
@@ -91,6 +131,7 @@ class Evaluator:
             return EvalResult(
                 value=node.value,
                 rendered=str(node.value),
+                op_type=None,
             )
 
         if isinstance(node, DiceNode):
@@ -157,12 +198,15 @@ class Evaluator:
 
         if count == 1:
             rendered = str(rolls[0])
+            op_type = None
         else:
-            rendered = f"({'+'.join(map(str, rolls))})"
+            rendered = "+".join(map(str, rolls))
+            op_type = "+"
 
         return EvalResult(
             value=total,
             rendered=rendered,
+            op_type=op_type,
         )
 
     # -----------------
@@ -179,13 +223,15 @@ class Evaluator:
         if node.operator == "+":
             return EvalResult(
                 operand.value,
-                f"+{operand.rendered}"
+                f"+{operand.rendered}",
+                op_type=None,
             )
 
         if node.operator == "-":
             return EvalResult(
                 -operand.value,
-                f"-{operand.rendered}"
+                f"-{operand.rendered}",
+                op_type=None,
             )
 
         raise EvaluatorError(
@@ -244,7 +290,16 @@ class Evaluator:
                 f"계산 결과 한도 초과 (최대 {MAX_RESULT_ABS})"
             )
 
+        rendered = format_op(
+            left.rendered,
+            left.op_type,
+            op,
+            right.rendered,
+            right.op_type,
+        )
+
         return EvalResult(
             value=value,
-            rendered=f"({left.rendered}{op}{right.rendered})",
+            rendered=rendered,
+            op_type=op,
         )

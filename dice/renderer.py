@@ -13,6 +13,7 @@ from .nodes import (
 )
 from .tokenizer import Tokenizer
 from .parser import Parser
+from .evaluator import format_op
 
 
 @dataclass(slots=True)
@@ -54,7 +55,6 @@ class Renderer:
             # 불필요한 바깥 괄호 정리
             if step_str.startswith("(") and step_str.endswith(")"):
                 inner = step_str[1:-1]
-                # 간단한 괄호 쌍 확인
                 if inner.count("(") == inner.count(")"):
                     step_str = inner
 
@@ -174,12 +174,10 @@ class Renderer:
             return node.operator + self._to_string(node.operand)
 
         if isinstance(node, BinaryOpNode):
-            return (
-                "("
-                + self._to_string(node.left)
-                + node.operator
-                + self._to_string(node.right)
-                + ")"
-            )
+            left_str = self._to_string(node.left)
+            left_op = node.left.operator if isinstance(node.left, BinaryOpNode) else None
+            right_str = self._to_string(node.right)
+            right_op = node.right.operator if isinstance(node.right, BinaryOpNode) else None
+            return format_op(left_str, left_op, node.operator, right_str, right_op)
 
         return str(node)

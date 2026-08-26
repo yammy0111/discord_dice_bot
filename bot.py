@@ -16,7 +16,6 @@ class DiceBot(commands.Bot):
 
     def __init__(self):
         intents = discord.Intents.default()
-        intents.message_content = True
 
         super().__init__(
             command_prefix=config.COMMAND_PREFIX,
@@ -40,7 +39,9 @@ class DiceBot(commands.Bot):
             logger.info(f"글로벌 {len(synced)}개 커맨드 동기화 완료.")
 
     async def on_ready(self) -> None:
-        logger.info(f"로그인 성공: {self.user} (ID: {self.user.id})")
+        user_name = self.user.name if self.user else "Bot"
+        user_id = self.user.id if self.user else 0
+        logger.info(f"로그인 성공: {user_name} (ID: {user_id})")
         await self.change_presence(
             activity=discord.Game(name="/roll 또는 /주사위")
         )
