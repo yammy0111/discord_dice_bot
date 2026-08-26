@@ -18,6 +18,25 @@ class TestEvaluator(unittest.TestCase):
         self.assertEqual(len(logs), 1)
         self.assertEqual(logs[0].total, 1)
 
+    def test_evaluate_1d1(self):
+        tokens = Tokenizer("1d1").tokenize()
+        tree = Parser(tokens).parse()
+        value, rendered, logs = Evaluator().evaluate(tree)
+
+        self.assertEqual(value, 1)
+        self.assertEqual(rendered, "1")
+        self.assertEqual(len(logs), 1)
+        self.assertEqual(logs[0].rolls, [1])
+
+    def test_evaluate_d1(self):
+        tokens = Tokenizer("d1").tokenize()
+        tree = Parser(tokens).parse()
+        value, rendered, logs = Evaluator().evaluate(tree)
+
+        self.assertEqual(value, 1)
+        self.assertEqual(rendered, "1")
+        self.assertEqual(len(logs), 1)
+
     def test_division_by_zero(self):
         tokens = Tokenizer("1d6 / 0").tokenize()
         tree = Parser(tokens).parse()
