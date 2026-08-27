@@ -94,7 +94,7 @@ class DiceCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         수식: str,
-        상세: bool = False,
+        상세: bool = True,
         비밀: bool = False,
     ) -> None:
         """한글 주사위 굴리기 슬래시 커맨드"""
