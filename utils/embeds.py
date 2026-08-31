@@ -113,7 +113,7 @@ def build_dice_embed(
 
         embed.add_field(
             name="최종 결과",
-            value=f"**{res.value}**",
+            value=f"**[{res.value}] **",
             inline=False,
         )
 

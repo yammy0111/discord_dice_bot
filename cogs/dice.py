@@ -63,14 +63,14 @@ class DiceCog(commands.Cog):
     )
     @app_commands.describe(
         expression="굴릴 주사위 수식 (예: 1d20+5, 2d6+3, 1d100)",
-        detail="상세 정보(개별 주사위 눈금, 치환 수식, 풀이 과정) 표시 여부 (기본값: True)",
+        detail="상세 정보(개별 주사위 눈금, 치환 수식, 풀이 과정) 표시 여부 (기본값: False)",
         secret="나에게만 결과를 표시할지 여부 (기본값: False)",
     )
     async def roll(
         self,
         interaction: discord.Interaction,
         expression: str,
-        detail: bool = True,
+        detail: bool = False,
         secret: bool = False,
     ) -> None:
         """영문 주사위 굴리기 슬래시 커맨드"""
@@ -87,14 +87,14 @@ class DiceCog(commands.Cog):
     )
     @app_commands.describe(
         수식="굴릴 주사위 수식 (예: 1d20+5, 2d6+3, 1d100)",
-        상세="상세 정보(개별 주사위 눈금, 치환 수식, 풀이 과정) 표시 여부 (기본값: True)",
+        상세="상세 정보(개별 주사위 눈금, 치환 수식, 풀이 과정) 표시 여부 (기본값: False)",
         비밀="나에게만 결과를 표시할지 여부 (기본값: False)",
     )
     async def roll_kr(
         self,
         interaction: discord.Interaction,
         수식: str,
-        상세: bool = True,
+        상세: bool = False,
         비밀: bool = False,
     ) -> None:
         """한글 주사위 굴리기 슬래시 커맨드"""
