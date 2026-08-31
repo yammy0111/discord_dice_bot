@@ -113,37 +113,34 @@ def build_dice_embed(
 
         embed.add_field(
             name="최종 결과",
-            value=f"## {res.value}",
+            value=f"**{res.value}**",
             inline=False,
         )
 
         embed.add_field(
             name="요청 수식",
-            value=f"{res.expression}",
+            value=f"`{res.expression}`",
             inline=False,
         )
+        if res.roll_logs:
+            log_lines = []
+            for entry in res.roll_logs:
+                rolls_str = ", ".join(map(str, entry.rolls))
+                if len(rolls_str) > 100:
+                    rolls_str = rolls_str[:97] + "..."
+                log_lines.append(f"• `{entry.expression}`: [{rolls_str}] (합: {entry.total})")
 
+            logs_text = "\n".join(log_lines)
+            if len(logs_text) > 1000:
+                logs_text = logs_text[:997] + "..."
+
+            embed.add_field(
+                name="개별 주사위 결과",
+                value=logs_text,
+                inline=False,
+            )
         # 상세 정보 옵션이 켜져 있을 때만 세부 항목 표시
         if show_detail:
-            # 개별 주사위 굴림 로그
-            if res.roll_logs:
-                log_lines = []
-                for entry in res.roll_logs:
-                    rolls_str = ", ".join(map(str, entry.rolls))
-                    if len(rolls_str) > 100:
-                        rolls_str = rolls_str[:97] + "..."
-                    log_lines.append(f"• `{entry.expression}`: [{rolls_str}] (합: {entry.total})")
-
-                logs_text = "\n".join(log_lines)
-                if len(logs_text) > 1000:
-                    logs_text = logs_text[:997] + "..."
-
-                embed.add_field(
-                    name="개별 주사위 결과",
-                    value=logs_text,
-                    inline=False,
-                )
-
             # 치환된 수식
             if res.substituted_expression != res.expression:
                 embed.add_field(
