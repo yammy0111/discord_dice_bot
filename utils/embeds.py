@@ -112,14 +112,14 @@ def build_dice_embed(
         )
 
         embed.add_field(
-            name="요청 수식",
-            value=f"`{res.expression}`",
+            name="최종 결과",
+            value=f"## {res.value}",
             inline=False,
         )
 
         embed.add_field(
-            name="최종 결과",
-            value=f"**`{res.value}`**",
+            name="요청 수식",
+            value=f"{res.expression}",
             inline=False,
         )
 
