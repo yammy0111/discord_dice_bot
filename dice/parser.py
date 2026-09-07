@@ -144,24 +144,31 @@ class Parser:
             self.consume(TokenType.RPAREN)
 
         elif token.type == TokenType.NUMBER:
-            first = int(token.value)
+            num_val: int | float = float(token.value) if "." in token.value else int(token.value)
+            if isinstance(num_val, float) and num_val.is_integer():
+                num_val = int(num_val)
             self.advance()
 
             # NdM or Nd%
             if self.current.type == TokenType.D:
+                if isinstance(num_val, float):
+                    raise ParserError("주사위 개수는 정수여야 합니다.")
                 self.advance()
 
                 if self.current.type == TokenType.PERCENT:
                     self.advance()
-                    node = DiceNode(count=first, sides=100)
+                    node = DiceNode(count=num_val, sides=100)
                 else:
                     sides_token = self.consume(TokenType.NUMBER)
+                    sides_val: int | float = float(sides_token.value) if "." in sides_token.value else int(sides_token.value)
+                    if isinstance(sides_val, float) and not sides_val.is_integer():
+                        raise ParserError("주사위 면 수는 정수여야 합니다.")
                     node = DiceNode(
-                        count=first,
-                        sides=int(sides_token.value),
+                        count=num_val,
+                        sides=int(sides_val),
                     )
             else:
-                node = NumberNode(first)
+                node = NumberNode(num_val)
 
         # d20 or d%
         elif token.type == TokenType.D:
@@ -172,9 +179,12 @@ class Parser:
                 node = DiceNode(count=1, sides=100)
             else:
                 sides_token = self.consume(TokenType.NUMBER)
+                sides_val = float(sides_token.value) if "." in sides_token.value else int(sides_token.value)
+                if isinstance(sides_val, float) and not sides_val.is_integer():
+                    raise ParserError("주사위 면 수는 정수여야 합니다.")
                 node = DiceNode(
                     count=1,
-                    sides=int(sides_token.value),
+                    sides=int(sides_val),
                 )
         else:
             raise ParserError(

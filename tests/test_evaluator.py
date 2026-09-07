@@ -44,7 +44,8 @@ class TestEvaluator(unittest.TestCase):
             Evaluator().evaluate(tree)
 
     def test_limit_exceeded(self):
-        tokens = Tokenizer("1000d6").tokenize()
+        from dice.limits import MAX_DICE_COUNT
+        tokens = Tokenizer(f"{MAX_DICE_COUNT + 1}d6").tokenize()
         tree = Parser(tokens).parse()
         with self.assertRaises(LimitExceededError):
             Evaluator().evaluate(tree)

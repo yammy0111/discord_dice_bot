@@ -125,7 +125,10 @@ class Renderer:
         if isinstance(node, PercentNode):
             if isinstance(node.operand, NumberNode):
                 val = node.operand.value / 100
-                val = round(val, 4) if isinstance(val, float) else val
+                if isinstance(val, float):
+                    val = round(val, 4)
+                    if val.is_integer():
+                        val = int(val)
                 return NumberNode(val), True
 
             new_operand, changed = self._find_and_reduce(node.operand)
@@ -145,19 +148,26 @@ class Renderer:
     ) -> int | float:
 
         if op == "+":
-            return left + right
+            res = left + right
+            return int(res) if isinstance(res, float) and res.is_integer() else res
 
         if op == "-":
-            return left - right
+            res = left - right
+            return int(res) if isinstance(res, float) and res.is_integer() else res
 
         if op == "*":
-            return left * right
+            res = left * right
+            return int(res) if isinstance(res, float) and res.is_integer() else res
 
         if op == "/":
             if right == 0:
                 return 0
             val = left / right
-            return round(val, 2) if isinstance(val, float) else val
+            if isinstance(val, float):
+                val = round(val, 2)
+                if val.is_integer():
+                    val = int(val)
+            return val
 
         if op == "%":
             if right == 0:

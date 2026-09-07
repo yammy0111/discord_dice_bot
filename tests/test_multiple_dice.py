@@ -26,7 +26,8 @@ class TestMultipleDice(unittest.TestCase):
         self.assertEqual(results[1].value, 4)
 
     def test_roll_multiple_limit_exceeded(self):
-        expr = ", ".join(["1d6"] * 11)
+        from dice.limits import MAX_EXPRESSIONS_COUNT
+        expr = ", ".join(["1d6"] * (MAX_EXPRESSIONS_COUNT + 1))
         with self.assertRaises(LimitExceededError):
             self.engine.roll_multiple(expr)
 

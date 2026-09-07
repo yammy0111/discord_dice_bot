@@ -133,7 +133,17 @@ class DiceEngine:
 
             for source_value, source_label in current_values:
                 for formula in formulas:
-                    full_expr = f"{source_value}{formula}"
+                    src_str = f"({source_value})" if source_value < 0 else f"{source_value}"
+                    if any(formula.startswith(op) for op in ("+", "-", "*", "/", "**")):
+                        full_expr = f"{src_str}{formula}"
+                    elif formula.endswith("%"):
+                        full_expr = f"{src_str}*{formula}"
+                    elif formula.startswith("%"):
+                        pct = formula[1:].strip()
+                        full_expr = f"{src_str}*{pct}%"
+                    else:
+                        full_expr = f"{src_str}{formula}"
+
                     try:
                         result = self.roll(full_expr)
                     except DiceError as e:

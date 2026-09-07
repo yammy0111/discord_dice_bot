@@ -70,20 +70,27 @@ class Tokenizer:
 
     def read_number(self) -> Token:
         start = self.pos
+        has_dot = False
 
         while True:
             ch = self.current_char()
 
-            if ch is None or not ch.isdigit():
+            if ch is None:
                 break
 
-            self.advance()
+            if ch.isdigit():
+                self.advance()
+            elif ch == "." and not has_dot:
+                if self.pos + 1 < self.length and self.text[self.pos + 1].isdigit():
+                    has_dot = True
+                    self.advance()
+                else:
+                    break
+            else:
+                break
 
-        return Token(
-            TokenType.NUMBER,
-            self.text[start:self.pos],
-            start,
-        )
+        val = self.text[start : self.pos]
+        return Token(TokenType.NUMBER, val, start)
 
     def next_token(self) -> Token:
         self.skip_whitespace()
@@ -97,7 +104,7 @@ class Tokenizer:
                 self.pos,
             )
 
-        if ch.isdigit():
+        if ch.isdigit() or (ch == "." and self.pos + 1 < self.length and self.text[self.pos + 1].isdigit()):
             return self.read_number()
 
         start = self.pos

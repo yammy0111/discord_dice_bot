@@ -99,6 +99,8 @@ class Evaluator:
 
         if isinstance(value, float):
             value = round(value, 2)
+            if value.is_integer():
+                value = int(value)
 
         return (
             value,
@@ -144,7 +146,10 @@ class Evaluator:
     ) -> EvalResult:
         operand = self._eval(node.operand)
         val = operand.value / 100
-        val = round(val, 4) if isinstance(val, float) else val
+        if isinstance(val, float):
+            val = round(val, 4)
+            if val.is_integer():
+                val = int(val)
         return EvalResult(
             value=val,
             rendered=f"{operand.rendered}%",
@@ -293,6 +298,8 @@ class Evaluator:
 
         if isinstance(value, float):
             value = round(value, 2)
+            if value.is_integer():
+                value = int(value)
 
         if abs(value) > MAX_RESULT_ABS:
             raise LimitExceededError(

@@ -16,10 +16,10 @@ class TestEmbeds(unittest.TestCase):
         mock_user.display_name = "Tester"
         mock_user.display_avatar.url = "http://example.com/avatar.png"
 
-        # show_detail=False (기본)
+        # show_detail=False (기본: 최종 결과, 요청 수식, 개별 주사위 결과 표시)
         embed = build_dice_embed(result, mock_user, show_detail=False)
         self.assertEqual(embed.title, "주사위 굴림 결과")
-        self.assertEqual(len(embed.fields), 2)  # 요청 수식, 최종 결과만 표시
+        self.assertEqual(len(embed.fields), 3)
 
     def test_build_dice_embed_detailed(self):
         engine = DiceEngine()
