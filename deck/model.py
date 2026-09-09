@@ -48,15 +48,15 @@ class Deck:
         self.cards = list(self.original_cards)
         self.deck_shuffle()
 
-    def reset_game(self) -> None:
-        """게임을 재시작합니다. 패를 모두 비우고 덱을 등록된 카드로 가득 채워 섞습니다."""
+    def reset_deck_and_hand(self) -> None:
+        """내 패를 모두 비우고 덱을 등록된 카드로 가득 채워 섞습니다."""
         self.hand.clear()
         self.cards = list(self.original_cards)
         self.deck_shuffle()
 
     def reset_deck(self) -> None:
-        """기존 덱 초기화: 게임 재시작(패 비우기 + 덱 원상복구)을 수행합니다."""
-        self.reset_game()
+        """덱과 패 초기화: 패를 모두 비우고 덱을 처음 상태로 되돌립니다."""
+        self.reset_deck_and_hand()
 
     def draw_card(self, num_cards: int = 1) -> tuple[list[str], bool]:
         """덱에서 카드를 뽑아 패로 가져옵니다.
