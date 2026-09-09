@@ -10,6 +10,45 @@ from utils.logger import setup_logger
 logger = setup_logger("DeckCog")
 
 
+class ConfirmView(discord.ui.View):
+    """실행 전 사용자 확인을 받기 위한 버튼 View."""
+
+    def __init__(self, author_id: int):
+        super().__init__(timeout=60)
+        self.author_id = author_id
+        self.value: bool | None = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "[오류] 명령어를 입력한 사용자만 선택할 수 있습니다.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="확인", style=discord.ButtonStyle.primary)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = True
+        for item in self.children:
+            item.disabled = True
+        self.stop()
+        await interaction.response.defer()
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = False
+        for item in self.children:
+            item.disabled = True
+        self.stop()
+        await interaction.response.edit_message(
+            content="[안내] 작업이 취소되었습니다.", view=self
+        )
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
 class DeckCog(commands.Cog, name="카드 덱"):
     """카드 덱 및 패 관리를 위한 디스코드 슬래시 명령어 모음."""
 
@@ -42,17 +81,30 @@ class DeckCog(commands.Cog, name="카드 덱"):
         user_id = interaction.user.id
         if deck_manager.has_deck(user_id):
             deck = deck_manager.get_deck(user_id)
-            await interaction.response.send_message(
-                f"[안내] {interaction.user.mention}님은 이미 덱을 보유하고 있습니다. (덱: {len(deck.cards)}/9장, 패: {len(deck.hand)}/9장)",
-                ephemeral=True,
+            prompt = (
+                f"[확인] {interaction.user.mention}님은 이미 덱을 보유하고 있습니다. "
+                f"(현재 덱: {len(deck.cards)}/9장, 패: {len(deck.hand)}/9장)\n"
+                "기존 덱을 삭제하고 새로운 덱을 생성하시겠습니까?"
             )
-            return
+        else:
+            prompt = f"[확인] {interaction.user.mention}님의 새로운 카드 덱을 생성하시겠습니까?"
 
-        deck_manager.create_deck(user_id)
-        logger.info(f"덱 생성: {interaction.user.name} ({user_id})")
-        await interaction.response.send_message(
-            f"{interaction.user.mention}님의 새로운 덱이 생성되었습니다. '/카드추가' 명령어로 카드를 넣어보세요."
-        )
+        view = ConfirmView(author_id=user_id)
+        await interaction.response.send_message(prompt, view=view, ephemeral=True)
+        await view.wait()
+
+        if view.value is True:
+            deck_manager.create_deck(user_id)
+            logger.info(f"덱 생성: {interaction.user.name} ({user_id})")
+            await interaction.edit_original_response(
+                content=f"{interaction.user.mention}님의 새로운 덱이 생성되었습니다. '/카드추가' 명령어로 카드를 넣어보세요.",
+                view=view,
+            )
+        elif view.value is None:
+            await interaction.edit_original_response(
+                content="[안내] 응답 시간이 초과되어 덱 생성이 취소되었습니다.",
+                view=view,
+            )
 
     @app_commands.command(name="카드추가", description="덱에 새로운 카드를 추가합니다. (최대 9장)")
     @app_commands.describe(카드이름="추가할 카드의 이름")
@@ -219,11 +271,26 @@ class DeckCog(commands.Cog, name="카드 덱"):
             )
             return
 
-        deck.reset_game()
-        logger.info(f"게임 재시작/덱 초기화: {interaction.user.name}")
-        await interaction.response.send_message(
-            f"게임을 재시작했습니다. 패를 모두 비우고 덱을 처음 상태로 초기화했습니다. (현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장, 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장)"
+        prompt = (
+            f"[확인] 정말 게임을 재시작하시겠습니까?\n"
+            f"현재 패({len(deck.hand)}장)를 모두 비우고 덱({len(deck.original_cards)}장)을 처음 상태로 초기화합니다."
         )
+        view = ConfirmView(author_id=interaction.user.id)
+        await interaction.response.send_message(prompt, view=view, ephemeral=True)
+        await view.wait()
+
+        if view.value is True:
+            deck.reset_game()
+            logger.info(f"게임 재시작/덱 초기화: {interaction.user.name}")
+            await interaction.edit_original_response(
+                content=f"게임을 재시작했습니다. 패를 모두 비우고 덱을 처음 상태로 초기화했습니다. (현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장, 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장)",
+                view=view,
+            )
+        elif view.value is None:
+            await interaction.edit_original_response(
+                content="[안내] 응답 시간이 초과되어 초기화가 취소되었습니다.",
+                view=view,
+            )
 
     @app_commands.command(name="게임재시작", description="패를 모두 비우고 덱을 처음 상태로 되돌려 새 게임을 시작합니다.")
     async def restart_game(self, interaction: discord.Interaction):
