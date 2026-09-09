@@ -96,23 +96,26 @@ class DeckCog(commands.Cog, name="카드 덱"):
             )
             return
 
-        if not deck.cards:
+        if not deck.cards and not deck.original_cards:
             await interaction.response.send_message(
-                "[안내] 덱에 남은 카드가 없습니다. '/카드추가'로 카드를 넣거나 '/덱초기화'를 이용해주세요.",
+                "[안내] 덱에 등록된 카드가 없습니다. 먼저 '/카드추가'로 카드를 등록해주세요.",
                 ephemeral=True,
             )
             return
 
-        drawn = deck.draw_card(장수)
+        drawn, refilled = deck.draw_card(장수)
         drawn_str = ", ".join(f"[{c}]" for c in drawn)
-        logger.info(f"카드 드로우: {interaction.user.name} -> {len(drawn)}장")
+        logger.info(f"카드 드로우: {interaction.user.name} -> {len(drawn)}장 (초기화 여부: {refilled})")
 
         msg = f"{interaction.user.mention}님이 카드를 {len(drawn)}장 뽑았습니다.\n"
         msg += f"- 뽑은 카드: {drawn_str}\n"
         msg += f"- 남은 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장 | 현재 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장"
 
+        if refilled:
+            msg += "\n[안내] 덱이 고갈되어 패는 그대로 두고 덱을 초기화하여 다시 뽑았습니다."
+
         if len(drawn) < 장수:
-            msg += f"\n(제한으로 인해 {len(drawn)}장만 뽑혔습니다.)"
+            msg += f"\n(패 제한으로 인해 {len(drawn)}장만 뽑혔습니다.)"
 
         await interaction.response.send_message(msg)
 
@@ -163,26 +166,32 @@ class DeckCog(commands.Cog, name="카드 덱"):
     @app_commands.command(name="덱확인", description="현재 내 덱에 남은 카드 목록과 장수를 확인합니다.")
     async def check_deck(self, interaction: discord.Interaction):
         deck = deck_manager.get_deck(interaction.user.id)
-        if not deck or not deck.cards:
+        if not deck or not deck.original_cards:
             await interaction.response.send_message(
-                "[안내] 덱이 비어 있습니다. '/카드추가'로 카드를 넣어주세요.",
+                "[안내] 덱이 비어 있습니다. 먼저 '/카드추가'로 카드를 넣어주세요.",
                 ephemeral=True,
             )
             return
 
         cards = deck.current_deck()
+        orig_cards = deck.registered_deck()
         display_limit = 20
-        deck_display = ", ".join(f"[{c}]" for c in cards[:display_limit])
+        deck_display = ", ".join(f"[{c}]" for c in cards[:display_limit]) if cards else "(고갈됨 - 뽑기 시 자동 초기화)"
         if len(cards) > display_limit:
             deck_display += f" 외 {len(cards) - display_limit}장..."
+
+        orig_display = ", ".join(f"[{c}]" for c in orig_cards[:display_limit])
+        if len(orig_cards) > display_limit:
+            orig_display += f" 외 {len(orig_cards) - display_limit}장..."
 
         embed = discord.Embed(
             title=f"{interaction.user.display_name}님의 덱 정보",
             color=discord.Color.green(),
         )
-        embed.add_field(name="남은 카드 수", value=f"{len(cards)}/{deck.MAX_DECK_SIZE}장", inline=True)
+        embed.add_field(name="남은 덱 카드 수", value=f"{len(cards)}/{deck.MAX_DECK_SIZE}장", inline=True)
         embed.add_field(name="현재 패 카드 수", value=f"{len(deck.hand)}/{deck.MAX_HAND_SIZE}장", inline=True)
-        embed.add_field(name="덱 카드 목록", value=deck_display, inline=False)
+        embed.add_field(name="등록된 원본 덱", value=f"{orig_display} (총 {len(orig_cards)}장)", inline=False)
+        embed.add_field(name="현재 남은 덱 카드", value=deck_display, inline=False)
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -201,19 +210,38 @@ class DeckCog(commands.Cog, name="카드 덱"):
             f"덱을 무작위로 섞었습니다. (현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장)"
         )
 
-    @app_commands.command(name="덱초기화", description="패의 카드를 모두 덱으로 회수하고 섞습니다.")
+    @app_commands.command(name="덱초기화", description="패를 모두 비우고 덱을 처음 상태로 되돌립니다. (게임 재시작)")
     async def reset_deck(self, interaction: discord.Interaction):
         deck = deck_manager.get_deck(interaction.user.id)
-        if not deck:
+        if not deck or not deck.original_cards:
             await interaction.response.send_message(
-                "[안내] 생성된 덱이 없습니다.", ephemeral=True
+                "[안내] 생성되거나 등록된 덱이 없습니다.", ephemeral=True
             )
             return
 
-        deck.reset_deck()
-        logger.info(f"덱 초기화: {interaction.user.name}")
+        deck.reset_game()
+        logger.info(f"게임 재시작/덱 초기화: {interaction.user.name}")
         await interaction.response.send_message(
-            f"패에 있던 카드를 모두 덱으로 회수하고 섞었습니다. (현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장, 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장)"
+            f"게임을 재시작했습니다. 패를 모두 비우고 덱을 처음 상태로 초기화했습니다. (현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장, 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장)"
+        )
+
+    @app_commands.command(name="게임재시작", description="패를 모두 비우고 덱을 처음 상태로 되돌려 새 게임을 시작합니다.")
+    async def restart_game(self, interaction: discord.Interaction):
+        await self.reset_deck(interaction)
+
+    @app_commands.command(name="덱리필", description="패는 그대로 유지하고 덱만 원래 등록된 카드로 다시 채웁니다.")
+    async def refill_deck(self, interaction: discord.Interaction):
+        deck = deck_manager.get_deck(interaction.user.id)
+        if not deck or not deck.original_cards:
+            await interaction.response.send_message(
+                "[안내] 생성되거나 등록된 덱이 없습니다.", ephemeral=True
+            )
+            return
+
+        deck.refill_deck()
+        logger.info(f"덱 리필: {interaction.user.name}")
+        await interaction.response.send_message(
+            f"패는 그대로 두고 덱만 원래 등록된 카드로 다시 채웠습니다. (현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장, 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장)"
         )
 
 
