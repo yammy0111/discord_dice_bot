@@ -27,6 +27,7 @@ class DiceBot(commands.Bot):
         """봇 시작 시 Cog 로드 및 Slash Command 동기화"""
         logger.info("Cog 로드 중...")
         await self.load_extension("cogs.dice")
+        await self.load_extension("cogs.deck")
 
         logger.info("슬래시 커맨드 동기화 중...")
         if config.GUILD_ID:
@@ -43,7 +44,7 @@ class DiceBot(commands.Bot):
         user_id = self.user.id if self.user else 0
         logger.info(f"로그인 성공: {user_name} (ID: {user_id})")
         await self.change_presence(
-            activity=discord.Game(name="/roll 또는 /주사위")
+            activity=discord.Game(name="/주사위 또는 /카드뽑기")
         )
 
 
