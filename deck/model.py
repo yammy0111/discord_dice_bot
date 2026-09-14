@@ -60,13 +60,9 @@ def format_cost(val: float) -> str:
 
 
 def format_card_display(name: str, cost: int, description: str = "") -> str:
-    """요청된 양식대로 카드 정보를 포맷합니다:
-    [카드 이름]
-    (숫자)
-    "카드 설명"
-    """
+    """요청된 양식대로 카드 정보를 포맷합니다."""
     desc = f'"{description}"' if description else '""'
-    return f"[{name}]\n({cost})\n{desc}"
+    return f"[{name}] ({cost}) {desc}"
 
 
 
@@ -129,21 +125,30 @@ class Deck:
 
     def modify_hand_card_cost(
         self, card_name: str, new_cost: int, current_cost: int | None = None
-    ) -> bool:
+    ) -> Card | None:
         """패에 있는 특정 카드의 소모 코스트를 이번 패에 머무는 동안 변경합니다.
 
         current_cost가 지정된 경우, 패에서 해당 코스트를 가진 동명 카드를 찾아 변경합니다.
         new_cost는 음이 아닌 정수 (>= 0) 여야 합니다.
         """
         if new_cost < 0:
-            return False
+            return None
         for card in self.hand:
             if card.name == card_name:
                 if current_cost is not None and card.cost != current_cost:
                     continue
                 card.cost = int(new_cost)
-                return True
-        return False
+                return card
+        return None
+
+    def modify_hand_card_cost_at(self, hand_index: int, new_cost: int) -> Card | None:
+        """패 위치를 지정해 카드 코스트를 변경하고 변경된 카드를 반환합니다."""
+        if new_cost < 0 or hand_index < 0 or hand_index >= len(self.hand):
+            return None
+
+        card = self.hand[hand_index]
+        card.cost = int(new_cost)
+        return card
 
 
     def is_deck_full(self) -> bool:
@@ -313,6 +318,38 @@ class Deck:
         self.hand.remove(target_card)
         return True, "사용 성공", target_card
 
+    def use_card_at(self, hand_index: int) -> tuple[bool, str, Card | None]:
+        """패 위치를 지정해 카드를 1장 사용합니다."""
+        if hand_index < 0 or hand_index >= len(self.hand):
+            return False, "선택한 카드가 패에 없습니다.", None
+
+        target_card = self.hand[hand_index]
+        if self.current_cost < target_card.cost:
+            return False, "코스트가 부족합니다.", target_card
+
+        self.current_cost -= float(target_card.cost)
+        self.hand.pop(hand_index)
+        return True, "사용 성공", target_card
+
+    def has_multiple_hand_variants(self, card_name: str) -> bool:
+        """패에 같은 이름이면서 구분 가능한 카드가 여러 장 있는지 확인합니다."""
+        variants = {
+            (card.cost, card.base_cost, card.description)
+            for card in self.hand
+            if card.name == card_name
+        }
+        return len(variants) > 1
+
+    def hand_variants_text(self, card_name: str) -> str:
+        """동명 카드 선택 안내용 텍스트를 반환합니다."""
+        lines = []
+        for i, card in enumerate(self.hand):
+            if card.name == card_name:
+                lines.append(
+                    f"{i + 1}. {format_card_display(card.name, card.cost, card.description)}"
+                )
+        return "\n".join(lines)
+
 
     def current_hand(self) -> list[Card]:
         """현재 패(Hand)에 있는 카드 목록을 반환합니다."""
@@ -331,7 +368,4 @@ class Deck:
         self.original_cards.clear()
         self.cards.clear()
         self.hand.clear()
-
-
-
 

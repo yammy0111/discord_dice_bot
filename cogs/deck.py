@@ -11,6 +11,11 @@ from utils.logger import setup_logger
 logger = setup_logger("DeckCog")
 
 
+def make_choice_name(card: Card, index: int) -> str:
+    label = f"{index + 1}. {format_card_display(card.name, card.cost, card.description)}"
+    return label if len(label) <= 100 else f"{label[:97]}..."
+
+
 class ConfirmView(discord.ui.View):
     """실행 전 사용자 확인을 받기 위한 버튼 View."""
 
@@ -70,21 +75,16 @@ class DeckCog(commands.Cog, name="카드 덱"):
         if not deck or not deck.hand:
             return []
 
-        # (카드이름, 코스트) 조합 중복 제거
-        seen_pairs: set[tuple[str, int]] = set()
         choices = []
-        for card in deck.hand:
-            pair = (card.name, card.cost)
-            if pair not in seen_pairs:
-                seen_pairs.add(pair)
-                name, cost = pair
-                if current.lower() in name.lower() or current.strip() in str(cost):
-                    # value를 '이름:코스트' 형태로 전달
-                    choices.append(
-                        app_commands.Choice(
-                            name=f"{name} ({cost})", value=f"{name}:{cost}"
-                        )
+        lowered = current.lower()
+        for index, card in enumerate(deck.hand):
+            if lowered in card.name.lower() or current.strip() in str(card.cost):
+                choices.append(
+                    app_commands.Choice(
+                        name=make_choice_name(card, index),
+                        value=f"hand:{index}",
                     )
+                )
 
         return choices[:25]
 
@@ -212,14 +212,16 @@ class DeckCog(commands.Cog, name="카드 덱"):
 
         if len(raw_names) == 1 and len(added_cards) == 1:
             c = added_cards[0]
-            desc_info = f" | 설명: {c.description}" if c.description else ""
-            msg = f"'{c.name}' (코스트 {c.cost}{desc_info}) 카드가 덱에 추가되었습니다. (현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장)"
+            msg = (
+                f"카드가 덱에 추가되었습니다:\n"
+                f"{format_card_display(c.name, c.cost, c.description)}\n"
+                f"- 현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장"
+            )
         else:
             lines = []
             for c in added_cards:
-                desc_info = f" (설명: {c.description})" if c.description else ""
-                lines.append(f"[{c.name}] 코스트 {c.cost}{desc_info}")
-            added_str = ", ".join(lines)
+                lines.append(format_card_display(c.name, c.cost, c.description))
+            added_str = "\n".join(lines)
             msg = f"카드 {len(added_cards)}장이 덱에 추가되었습니다:\n{added_str}\n- 현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장"
             if len(added_cards) < len(raw_names):
                 msg += f"\n(덱 최대 매수 {deck.MAX_DECK_SIZE}장 제한으로 인해 {len(raw_names) - len(added_cards)}장은 추가되지 않았습니다.)"
@@ -262,11 +264,13 @@ class DeckCog(commands.Cog, name="카드 덱"):
             return
 
         drawn, refilled = deck.draw_card(장수)
-        drawn_str = ", ".join(f"[{c.name}] (코스트 {c.cost})" for c in drawn)
+        drawn_str = "\n".join(
+            format_card_display(c.name, c.cost, c.description) for c in drawn
+        )
         logger.info(f"카드 드로우: {interaction.user.name} -> {len(drawn)}장 (초기화 여부: {refilled})")
 
         msg = f"{interaction.user.mention}님이 카드를 {len(drawn)}장 뽑았습니다.\n"
-        msg += f"- 뽑은 카드: {drawn_str}\n"
+        msg += f"- 뽑은 카드:\n{drawn_str}\n"
         msg += (
             f"- 남은 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장 | "
             f"현재 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장 | "
@@ -333,18 +337,32 @@ class DeckCog(commands.Cog, name="카드 덱"):
             )
             return
 
-        # 자동완성 값 파싱: '이름:코스트' 형태이거나 일반 '이름' 형태
+        # 자동완성 값 파싱: 'hand:패번호' 형태이거나 일반 '이름' 형태
         target_name = 카드이름.strip()
         target_cost: int | None = None
-        if ":" in target_name:
+        hand_index: int | None = None
+        if target_name.startswith("hand:") and target_name[5:].isdigit():
+            hand_index = int(target_name[5:])
+        elif ":" in target_name:
             parts = target_name.rsplit(":", 1)
             if parts[1].strip().isdigit():
                 target_name = parts[0].strip()
                 target_cost = int(parts[1].strip())
 
-        success, reason, card = deck.use_card(target_name, target_cost=target_cost)
+        if hand_index is None and target_cost is None and deck.has_multiple_hand_variants(target_name):
+            await interaction.response.send_message(
+                "[안내] 패에 같은 이름의 카드가 여러 종류 있습니다. 자동완성 목록에서 사용할 카드를 선택해주세요.\n"
+                f"{deck.hand_variants_text(target_name)}",
+                ephemeral=True,
+            )
+            return
+
+        if hand_index is not None:
+            success, reason, card = deck.use_card_at(hand_index)
+        else:
+            success, reason, card = deck.use_card(target_name, target_cost=target_cost)
         if success and card:
-            logger.info(f"카드 사용: {interaction.user.name} -> '{card.name}' (코스트 {card.cost})")
+            logger.info(f"카드 사용: {interaction.user.name} -> '{card.name}' ({card.cost})")
             card_box = format_card_display(card.name, card.cost, card.description)
             await interaction.response.send_message(
                 f"{interaction.user.mention}님이 패에서 카드를 사용했습니다:\n{card_box}\n"
@@ -383,15 +401,19 @@ class DeckCog(commands.Cog, name="카드 덱"):
         orig_cards = deck.registered_deck()
         display_limit = 20
         deck_display = (
-            ", ".join(f"[{c.name}] (코스트 {c.cost})" for c in cards[:display_limit])
+            "\n".join(
+                format_card_display(c.name, c.cost, c.description)
+                for c in cards[:display_limit]
+            )
             if cards
             else "(고갈됨 - 뽑기 시 자동 초기화)"
         )
         if len(cards) > display_limit:
             deck_display += f" 외 {len(cards) - display_limit}장..."
 
-        orig_display = ", ".join(
-            f"[{c.name}] (코스트 {c.base_cost})" for c in orig_cards[:display_limit]
+        orig_display = "\n".join(
+            format_card_display(c.name, c.base_cost, c.description)
+            for c in orig_cards[:display_limit]
         )
         if len(orig_cards) > display_limit:
             orig_display += f" 외 {len(orig_cards) - display_limit}장..."
@@ -568,20 +590,44 @@ class DeckCog(commands.Cog, name="카드 덱"):
             )
             return
 
-        # 자동완성 값 파싱: '이름:코스트' 또는 '이름'
+        # 자동완성 값 파싱: 'hand:패번호', '이름:코스트', 또는 '이름'
         target_name = 카드이름.strip()
         target_cost: int | None = None
-        if ":" in target_name:
+        hand_index: int | None = None
+        if target_name.startswith("hand:") and target_name[5:].isdigit():
+            hand_index = int(target_name[5:])
+        elif ":" in target_name:
             parts = target_name.rsplit(":", 1)
             if parts[1].strip().isdigit():
                 target_name = parts[0].strip()
                 target_cost = int(parts[1].strip())
 
-        if deck.modify_hand_card_cost(target_name, 변경할코스트, current_cost=target_cost):
-            logger.info(f"패 카드 코스트 변경: {interaction.user.name} -> {target_name} : {변경할코스트}")
+        changed_card = None
+        if hand_index is not None:
+            changed_card = deck.modify_hand_card_cost_at(hand_index, 변경할코스트)
+            changed = changed_card is not None
+            if changed_card:
+                target_name = changed_card.name
+        else:
+            changed_card = deck.modify_hand_card_cost(
+                target_name, 변경할코스트, current_cost=target_cost
+            )
+            changed = changed_card is not None
+
+        if changed:
+            logger.info(
+                f"패 카드 코스트 변경: {interaction.user.name} -> {target_name} : {변경할코스트}"
+            )
             orig_info = f" (기존 {target_cost})" if target_cost is not None else ""
+            card_display = (
+                format_card_display(
+                    changed_card.name, changed_card.cost, changed_card.description
+                )
+                if changed_card
+                else f"[{target_name}] ({변경할코스트}) \"\""
+            )
             await interaction.response.send_message(
-                f"{interaction.user.mention}님의 패에 있는 '[{target_name}]'{orig_info} 카드의 코스트가 이번 패에 머무는 동안 ({변경할코스트})(으)로 변경되었습니다.",
+                f"{interaction.user.mention}님의 패 카드 코스트가 변경되었습니다{orig_info}:\n{card_display}",
                 ephemeral=False,
             )
         else:
@@ -661,10 +707,13 @@ class DeckCog(commands.Cog, name="카드 덱"):
         if updated:
             card = deck.get_card(카드이름)
             logger.info(f"카드 정보 수정: {interaction.user.name} -> {카드이름}")
-            desc_str = f" | 설명: {card.description}" if card and card.description else ""
-            cost_str = f" | 코스트: {card.cost}" if card else ""
+            card_display = (
+                format_card_display(card.name, card.cost, card.description)
+                if card
+                else f"[{카드이름}]"
+            )
             await interaction.response.send_message(
-                f"{interaction.user.mention}님의 '[{카드이름}]' 카드 정보가 수정되었습니다.{cost_str}{desc_str}",
+                f"{interaction.user.mention}님의 카드 정보가 수정되었습니다:\n{card_display}",
                 ephemeral=False,
             )
         else:
@@ -676,5 +725,3 @@ class DeckCog(commands.Cog, name="카드 덱"):
 async def setup(bot: commands.Bot) -> None:
     """Cog를 봇에 등록합니다."""
     await bot.add_cog(DeckCog(bot))
-
-
