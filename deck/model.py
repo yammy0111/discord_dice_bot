@@ -59,6 +59,17 @@ def format_cost(val: float) -> str:
     return f"{val:.2f}".rstrip("0").rstrip(".")
 
 
+def format_card_display(name: str, cost: int, description: str = "") -> str:
+    """요청된 양식대로 카드 정보를 포맷합니다:
+    [카드 이름]
+    (숫자)
+    "카드 설명"
+    """
+    desc = f'"{description}"' if description else '""'
+    return f"[{name}]\n({cost})\n{desc}"
+
+
+
 class Deck:
     """사용자별 덱, 패(Hand), 코스트(Cost)를 관리하는 클래스.
 
@@ -116,18 +127,24 @@ class Deck:
         self.current_cost = min(float(self.max_cost), self.current_cost + float(amount))
         return self.current_cost - old_cost
 
-    def modify_hand_card_cost(self, card_name: str, new_cost: int) -> bool:
+    def modify_hand_card_cost(
+        self, card_name: str, new_cost: int, current_cost: int | None = None
+    ) -> bool:
         """패에 있는 특정 카드의 소모 코스트를 이번 패에 머무는 동안 변경합니다.
 
+        current_cost가 지정된 경우, 패에서 해당 코스트를 가진 동명 카드를 찾아 변경합니다.
         new_cost는 음이 아닌 정수 (>= 0) 여야 합니다.
         """
         if new_cost < 0:
             return False
         for card in self.hand:
             if card.name == card_name:
+                if current_cost is not None and card.cost != current_cost:
+                    continue
                 card.cost = int(new_cost)
                 return True
         return False
+
 
     def is_deck_full(self) -> bool:
         """등록된 덱 카드가 최대치(9장)인지 확인합니다."""
@@ -265,18 +282,26 @@ class Deck:
 
         return drawn_cards, refilled
 
-    def use_card(self, card_name: str) -> tuple[bool, str, Card | None]:
+    def use_card(
+        self, card_name: str, target_cost: int | None = None
+    ) -> tuple[bool, str, Card | None]:
         """패(Hand)에서 카드를 1장 사용합니다.
 
+        target_cost가 지정된 경우, 해당 코스트를 가진 카드를 우선적으로 찾아 사용합니다.
         반환값: (성공여부, 메시지/사유, 사용된 Card 객체)
         """
         target_card: Card | None = None
         for card in self.hand:
             if card.name == card_name:
+                if target_cost is not None and card.cost != target_cost:
+                    continue
                 target_card = card
                 break
 
+        # target_cost를 지정했는데 못 찾은 경우, 일반 이름으로 fallback하지 않고 실패 처리
         if not target_card:
+            if target_cost is not None:
+                return False, f"패에 코스트 {target_cost}인 '{card_name}' 카드가 없습니다.", None
             return False, "패에 카드가 없습니다.", None
 
         # 코스트 검사 (소모 코스트 <= 보유 코스트)
@@ -287,6 +312,7 @@ class Deck:
         self.current_cost -= float(target_card.cost)
         self.hand.remove(target_card)
         return True, "사용 성공", target_card
+
 
     def current_hand(self) -> list[Card]:
         """현재 패(Hand)에 있는 카드 목록을 반환합니다."""

@@ -1,4 +1,4 @@
-from deck.model import Card, Deck, format_cost, parse_card_input
+from deck.model import Card, Deck, format_card_display, format_cost, parse_card_input
 from deck.manager import DeckManager, deck_manager
 
 __all__ = [
@@ -6,7 +6,9 @@ __all__ = [
     "Deck",
     "DeckManager",
     "deck_manager",
+    "format_card_display",
     "format_cost",
     "parse_card_input",
 ]
+
 

@@ -4,8 +4,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from deck import Card, deck_manager, format_cost, parse_card_input
+from deck import Card, deck_manager, format_card_display, format_cost, parse_card_input
 from utils.logger import setup_logger
+
 
 logger = setup_logger("DeckCog")
 
@@ -61,24 +62,32 @@ class DeckCog(commands.Cog, name="카드 덱"):
     async def hand_card_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        """사용자의 현재 패에 있는 카드를 자동완성 목록으로 제공합니다."""
+        """사용자의 현재 패에 있는 카드를 자동완성 목록으로 제공합니다.
+
+        동일한 이름이라도 코스트가 다르면 각각 선택할 수 있도록 제공합니다.
+        """
         deck = deck_manager.get_deck(interaction.user.id)
         if not deck or not deck.hand:
             return []
 
-        unique_cards: dict[str, int] = {}
-        for card in deck.hand:
-            if card.name not in unique_cards:
-                unique_cards[card.name] = card.cost
-
+        # (카드이름, 코스트) 조합 중복 제거
+        seen_pairs: set[tuple[str, int]] = set()
         choices = []
-        for name, cost in unique_cards.items():
-            if current.lower() in name.lower():
-                choices.append(
-                    app_commands.Choice(name=f"{name} (코스트 {cost})", value=name)
-                )
+        for card in deck.hand:
+            pair = (card.name, card.cost)
+            if pair not in seen_pairs:
+                seen_pairs.add(pair)
+                name, cost = pair
+                if current.lower() in name.lower() or current.strip() in str(cost):
+                    # value를 '이름:코스트' 형태로 전달
+                    choices.append(
+                        app_commands.Choice(
+                            name=f"{name} ({cost})", value=f"{name}:{cost}"
+                        )
+                    )
 
         return choices[:25]
+
 
     async def all_deck_cards_autocomplete(
         self, interaction: discord.Interaction, current: str
@@ -288,10 +297,11 @@ class DeckCog(commands.Cog, name="카드 덱"):
         if not hand_cards:
             hand_display = "(패가 비어 있습니다. '/카드뽑기'로 카드를 뽑아보세요.)"
         else:
-            hand_display = "\n".join(
-                f"{i + 1}. [{card.name}] (코스트 {card.cost})"
-                for i, card in enumerate(hand_cards)
-            )
+            blocks = []
+            for i, card in enumerate(hand_cards):
+                card_str = format_card_display(card.name, card.cost, card.description)
+                blocks.append(f"{i + 1}. {card_str}")
+            hand_display = "\n\n".join(blocks)
 
         embed = discord.Embed(
             title=f"{interaction.user.display_name}님의 패 정보 ({len(hand_cards)}/{deck.MAX_HAND_SIZE}장)",
@@ -311,7 +321,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
         await interaction.response.send_message(embed=embed, ephemeral=비밀)
 
     @app_commands.command(name="카드사용", description="패에서 카드를 1장 사용합니다. (코스트 자동 차감)")
-    @app_commands.describe(카드이름="사용할 카드의 이름 (자동완성 지원)")
+    @app_commands.describe(카드이름="사용할 카드의 이름 (자동완성 지원, 코스트별 개별 선택 가능)")
     @app_commands.autocomplete(카드이름=hand_card_autocomplete)
     async def use_card(
         self, interaction: discord.Interaction, 카드이름: str
@@ -323,12 +333,22 @@ class DeckCog(commands.Cog, name="카드 덱"):
             )
             return
 
-        success, reason, card = deck.use_card(카드이름)
+        # 자동완성 값 파싱: '이름:코스트' 형태이거나 일반 '이름' 형태
+        target_name = 카드이름.strip()
+        target_cost: int | None = None
+        if ":" in target_name:
+            parts = target_name.rsplit(":", 1)
+            if parts[1].strip().isdigit():
+                target_name = parts[0].strip()
+                target_cost = int(parts[1].strip())
+
+        success, reason, card = deck.use_card(target_name, target_cost=target_cost)
         if success and card:
             logger.info(f"카드 사용: {interaction.user.name} -> '{card.name}' (코스트 {card.cost})")
+            card_box = format_card_display(card.name, card.cost, card.description)
             await interaction.response.send_message(
-                f"{interaction.user.mention}님이 패에서 '[{card.name}]' 카드를 사용했습니다. "
-                f"(소모 코스트: {card.cost}, 잔여 코스트: {format_cost(deck.current_cost)}/{deck.max_cost}, 남은 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장)",
+                f"{interaction.user.mention}님이 패에서 카드를 사용했습니다:\n{card_box}\n"
+                f"- 잔여 코스트: {format_cost(deck.current_cost)}/{deck.max_cost} | 남은 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장",
                 ephemeral=False,
             )
         else:
@@ -337,11 +357,14 @@ class DeckCog(commands.Cog, name="카드 덱"):
                     f"[오류] 코스트가 부족합니다. (필요: {card.cost}, 보유: {format_cost(deck.current_cost)}/{deck.max_cost})",
                     ephemeral=True,
                 )
+            elif "패에 코스트" in reason:
+                await interaction.response.send_message(f"[오류] {reason}", ephemeral=True)
             else:
                 await interaction.response.send_message(
-                    f"[오류] 패에 '{카드이름}' 카드가 없습니다. '/패확인'으로 현재 패를 확인해보세요.",
+                    f"[오류] 패에 '{target_name}' 카드가 없습니다. '/패확인'으로 현재 패를 확인해보세요.",
                     ephemeral=True,
                 )
+
 
     @app_commands.command(name="덱확인", description="현재 내 덱에 남은 카드 목록과 장수를 확인합니다.")
     @app_commands.describe(비밀="나에게만 덱 정보를 표시할지 여부 (기본값: False, 공개)")
@@ -525,7 +548,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
 
     @app_commands.command(name="카드코스트변경", description="패에 머무는 동안 패에 있는 특정 카드의 소모 코스트를 변경합니다.")
     @app_commands.describe(
-        카드이름="패에서 변경할 카드의 이름",
+        카드이름="패에서 변경할 카드의 이름 (자동완성 지원, 동명 카드 코스트별 선택 가능)",
         변경할코스트="새로 지정할 소모 코스트 (음이 아닌 정수, 0 이상)",
     )
     @app_commands.autocomplete(카드이름=hand_card_autocomplete)
@@ -545,15 +568,25 @@ class DeckCog(commands.Cog, name="카드 덱"):
             )
             return
 
-        if deck.modify_hand_card_cost(카드이름, 변경할코스트):
-            logger.info(f"패 카드 코스트 변경: {interaction.user.name} -> {카드이름} : {변경할코스트}")
+        # 자동완성 값 파싱: '이름:코스트' 또는 '이름'
+        target_name = 카드이름.strip()
+        target_cost: int | None = None
+        if ":" in target_name:
+            parts = target_name.rsplit(":", 1)
+            if parts[1].strip().isdigit():
+                target_name = parts[0].strip()
+                target_cost = int(parts[1].strip())
+
+        if deck.modify_hand_card_cost(target_name, 변경할코스트, current_cost=target_cost):
+            logger.info(f"패 카드 코스트 변경: {interaction.user.name} -> {target_name} : {변경할코스트}")
+            orig_info = f" (기존 {target_cost})" if target_cost is not None else ""
             await interaction.response.send_message(
-                f"{interaction.user.mention}님의 패에 있는 '[{카드이름}]' 카드의 코스트가 이번 패에 머무는 동안 {변경할코스트}(으)로 변경되었습니다.",
+                f"{interaction.user.mention}님의 패에 있는 '[{target_name}]'{orig_info} 카드의 코스트가 이번 패에 머무는 동안 ({변경할코스트})(으)로 변경되었습니다.",
                 ephemeral=False,
             )
         else:
             await interaction.response.send_message(
-                f"[오류] 패에 '{카드이름}' 카드가 없습니다. '/패확인'으로 현재 패를 확인해보세요.",
+                f"[오류] 패에 '{target_name}' 카드가 없습니다. '/패확인'으로 현재 패를 확인해보세요.",
                 ephemeral=True,
             )
 
@@ -580,15 +613,15 @@ class DeckCog(commands.Cog, name="카드 덱"):
             )
             return
 
-        desc_text = card.description if card.description else "(등록된 설명이 없습니다.)"
+        card_display = format_card_display(card.name, card.cost, card.description)
         embed = discord.Embed(
-            title=f"카드 정보: [{card.name}]",
+            title="카드 정보",
+            description=card_display,
             color=discord.Color.purple(),
         )
-        embed.add_field(name="소모 코스트", value=f"{card.cost} (기본: {card.base_cost})", inline=True)
-        embed.add_field(name="카드 설명", value=desc_text, inline=False)
 
         await interaction.response.send_message(embed=embed, ephemeral=비밀)
+
 
     @app_commands.command(name="카드정보설정", description="이미 등록된 카드의 설명이나 코스트를 추가/수정합니다.")
     @app_commands.describe(
