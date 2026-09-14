@@ -18,6 +18,11 @@ class ConfirmView(discord.ui.View):
         self.author_id = author_id
         self.value: bool | None = None
 
+    def disable_buttons(self) -> None:
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
             await interaction.response.send_message(
@@ -29,24 +34,21 @@ class ConfirmView(discord.ui.View):
     @discord.ui.button(label="확인", style=discord.ButtonStyle.primary)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = True
-        for item in self.children:
-            item.disabled = True
+        self.disable_buttons()
         self.stop()
         await interaction.response.defer()
 
     @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = False
-        for item in self.children:
-            item.disabled = True
+        self.disable_buttons()
         self.stop()
         await interaction.response.edit_message(
             content="[안내] 작업이 취소되었습니다.", view=self
         )
 
     async def on_timeout(self):
-        for item in self.children:
-            item.disabled = True
+        self.disable_buttons()
 
 
 class DeckCog(commands.Cog, name="카드 덱"):
@@ -79,8 +81,8 @@ class DeckCog(commands.Cog, name="카드 덱"):
     @app_commands.command(name="덱생성", description="새로운 카드 덱을 생성합니다.")
     async def create_deck(self, interaction: discord.Interaction):
         user_id = interaction.user.id
-        if deck_manager.has_deck(user_id):
-            deck = deck_manager.get_deck(user_id)
+        deck = deck_manager.get_deck(user_id)
+        if deck:
             prompt = (
                 f"[확인] {interaction.user.mention}님은 이미 덱을 보유하고 있습니다. "
                 f"(현재 덱: {len(deck.cards)}/9장, 패: {len(deck.hand)}/9장)\n"
@@ -316,10 +318,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
                 f"패를 모두 비우고 덱을 처음 상태로 되돌렸습니다. "
                 f"(현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장, 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장)"
             )
-            if interaction.channel:
-                await interaction.channel.send(public_msg)
-            else:
-                await interaction.followup.send(public_msg, ephemeral=False)
+            await interaction.followup.send(public_msg, ephemeral=False)
         elif view.value is None:
             await interaction.edit_original_response(
                 content="[안내] 응답 시간이 초과되어 초기화가 취소되었습니다.",
@@ -339,6 +338,22 @@ class DeckCog(commands.Cog, name="카드 덱"):
         logger.info(f"덱 리필: {interaction.user.name}")
         await interaction.response.send_message(
             f"{interaction.user.mention}님이 패는 그대로 두고 덱만 원래 등록된 카드로 다시 채웠습니다. (현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장, 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장)",
+            ephemeral=False,
+        )
+
+    @app_commands.command(name="임시 카드 추가", description="임시로 덱에 카드를 추가합니다.")
+    async def add_temporary_card(self, interaction: discord.Interaction, card: str):
+        deck = deck_manager.get_deck(interaction.user.id)
+        if not deck:
+            await interaction.response.send_message(
+                "[안내] 생성되거나 등록된 덱이 없습니다.", ephemeral=True
+            )
+            return
+
+        deck.add_temporary_card(card)
+        logger.info(f"임시 카드 추가: {interaction.user.name}, 카드: {card}")
+        await interaction.response.send_message(
+            f"{interaction.user.mention}님이 임시 카드 '{card}'를 덱에 추가했습니다. (현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장)",
             ephemeral=False,
         )
 

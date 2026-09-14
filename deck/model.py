@@ -114,4 +114,7 @@ class Deck:
         self.cards.clear()
         self.hand.clear()
 
+    def add_temporary_card(self, card: str) -> None:
+        """임시로 덱에 카드를 추가합니다. (등록된 덱에는 영향을 주지 않음)"""
+        self.cards.append(card)
 
