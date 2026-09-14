@@ -341,7 +341,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
             ephemeral=False,
         )
 
-    @app_commands.command(name="임시 카드 추가", description="임시로 덱에 카드를 추가합니다.")
+    @app_commands.command(name="임시카드추가", description="임시로 덱에 카드를 추가합니다.")
     async def add_temporary_card(self, interaction: discord.Interaction, card: str):
         deck = deck_manager.get_deck(interaction.user.id)
         if not deck:
