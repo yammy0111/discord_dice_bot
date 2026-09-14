@@ -446,25 +446,6 @@ class DeckCog(commands.Cog, name="카드 덱"):
 
         await interaction.response.send_message(embed=embed, ephemeral=비밀)
 
-    @app_commands.command(name="덱셔플", description="현재 덱에 남아있는 카드를 무작위로 섞습니다.")
-    @app_commands.describe(비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)")
-    async def shuffle_deck(
-        self, interaction: discord.Interaction, 비밀: bool = False
-    ):
-        deck = deck_manager.get_deck(interaction.user.id)
-        if not deck or not deck.cards:
-            await interaction.response.send_message(
-                "[안내] 덱에 섞을 카드가 없습니다.", ephemeral=True
-            )
-            return
-
-        deck.deck_shuffle()
-        logger.info(f"덱 셔플: {interaction.user.name}")
-        await interaction.response.send_message(
-            f"덱을 무작위로 섞었습니다. (현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장)",
-            ephemeral=비밀,
-        )
-
     @app_commands.command(name="덱초기화", description="내 패를 모두 비우고 덱과 코스트를 처음 상태로 되돌립니다.")
     async def reset_deck(self, interaction: discord.Interaction):
         deck = deck_manager.get_deck(interaction.user.id)
@@ -477,7 +458,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
         prompt = (
             f"[확인] 정말 덱과 패를 초기화하시겠습니까?\n"
             f"- 현재 패({len(deck.hand)}장)를 모두 비우고 덱({len(deck.original_cards)}장)을 원상복구합니다.\n"
-            f"- 코스트가 기본 최대치({deck.base_max_cost})로 충전되며 전투 중 증가분이 초기화됩니다."
+            f"- 코스트가 기본 최대치({deck.base_max_cost})로 충전되며 전투 중 최대 코스트 변경값이 초기화됩니다."
         )
         view = ConfirmView(author_id=interaction.user.id)
         await interaction.response.send_message(prompt, view=view, ephemeral=True)
@@ -537,7 +518,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
             ephemeral=False,
         )
 
-    @app_commands.command(name="코스트회복", description="코스트를 지정한 수치만큼 증감합니다. (음수 입력 시 감소)")
+    @app_commands.command(name="코스트변경", description="현재 코스트를 변경합니다. 양수는 회복, 음수는 감소입니다.")
     @app_commands.describe(
         수치="변경할 코스트 수치 (양수면 회복, 음수면 감소 / 소수 가능, 기본값: 1.0)",
         비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
@@ -554,13 +535,13 @@ class DeckCog(commands.Cog, name="카드 덱"):
             ephemeral=비밀,
         )
 
-    @app_commands.command(name="최대코스트증가", description="이번 전투 동안 최대 코스트를 증감합니다. (음수 입력 시 감소)")
-    @app_commands.describe(증가량="이번 전투 동안 변경할 최대 코스트 (양수면 증가, 음수면 감소)")
-    async def add_max_cost(self, interaction: discord.Interaction, 증가량: int = 1):
+    @app_commands.command(name="최대코스트변경", description="이번 전투 동안 최대 코스트를 변경합니다. 양수는 증가, 음수는 감소입니다.")
+    @app_commands.describe(수치="이번 전투 동안 변경할 최대 코스트 (양수면 증가, 음수면 감소)")
+    async def add_max_cost(self, interaction: discord.Interaction, 수치: int = 1):
         deck = deck_manager.get_or_create_deck(interaction.user.id)
-        changed = deck.add_max_cost(증가량)
+        changed = deck.add_max_cost(수치)
         result_text = describe_delta(float(changed), "증가했습니다", "감소했습니다")
-        logger.info(f"전투 중 최대 코스트 증감: {interaction.user.name} -> {증가량} (실제 {changed})")
+        logger.info(f"전투 중 최대 코스트 증감: {interaction.user.name} -> {수치} (실제 {changed})")
         await interaction.response.send_message(
             f"{interaction.user.mention}님의 이번 전투 최대 코스트가 {result_text}. (현재 최대 코스트: {deck.max_cost}, 보유 코스트: {format_cost(deck.current_cost)})",
             ephemeral=False,
