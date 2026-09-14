@@ -16,6 +16,14 @@ def make_choice_name(card: Card, index: int) -> str:
     return label if len(label) <= 100 else f"{label[:97]}..."
 
 
+def describe_delta(value: float, up_word: str, down_word: str) -> str:
+    if value > 0:
+        return f"{format_cost(value)} {up_word}"
+    if value < 0:
+        return f"{format_cost(abs(value))} {down_word}"
+    return "변동되지 않았습니다"
+
+
 class ConfirmView(discord.ui.View):
     """실행 전 사용자 확인을 받기 위한 버튼 View."""
 
@@ -529,42 +537,32 @@ class DeckCog(commands.Cog, name="카드 덱"):
             ephemeral=False,
         )
 
-    @app_commands.command(name="코스트회복", description="코스트를 지정한 수치만큼 회복합니다. (음이 아닌 유리수)")
+    @app_commands.command(name="코스트회복", description="코스트를 지정한 수치만큼 증감합니다. (음수 입력 시 감소)")
     @app_commands.describe(
-        수치="회복할 코스트 수치 (양의 유리수/소수 가능, 기본값: 1.0)",
+        수치="변경할 코스트 수치 (양수면 회복, 음수면 감소 / 소수 가능, 기본값: 1.0)",
         비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
     )
     async def restore_cost(
         self, interaction: discord.Interaction, 수치: float = 1.0, 비밀: bool = False
     ):
         deck = deck_manager.get_or_create_deck(interaction.user.id)
-        if 수치 <= 0:
-            await interaction.response.send_message(
-                "[오류] 회복 수치는 0보다 커야 합니다.", ephemeral=True
-            )
-            return
-
-        restored = deck.restore_cost(수치)
-        logger.info(f"코스트 회복: {interaction.user.name} -> {수치}")
+        changed = deck.restore_cost(수치)
+        result_text = describe_delta(changed, "회복되었습니다", "감소했습니다")
+        logger.info(f"코스트 증감: {interaction.user.name} -> {수치} (실제 {changed})")
         await interaction.response.send_message(
-            f"{interaction.user.mention}님의 코스트가 {format_cost(restored)} 회복되었습니다. (현재 코스트: {format_cost(deck.current_cost)}/{deck.max_cost})",
+            f"{interaction.user.mention}님의 코스트가 {result_text}. (현재 코스트: {format_cost(deck.current_cost)}/{deck.max_cost})",
             ephemeral=비밀,
         )
 
-    @app_commands.command(name="최대코스트증가", description="이번 전투 동안 최대 코스트를 추가로 증가시킵니다. (자연수)")
-    @app_commands.describe(증가량="이번 전투 동안 추가할 최대 코스트 (자연수, 1 이상)")
+    @app_commands.command(name="최대코스트증가", description="이번 전투 동안 최대 코스트를 증감합니다. (음수 입력 시 감소)")
+    @app_commands.describe(증가량="이번 전투 동안 변경할 최대 코스트 (양수면 증가, 음수면 감소)")
     async def add_max_cost(self, interaction: discord.Interaction, 증가량: int = 1):
         deck = deck_manager.get_or_create_deck(interaction.user.id)
-        if 증가량 < 1:
-            await interaction.response.send_message(
-                "[오류] 증가량은 1 이상의 자연수여야 합니다.", ephemeral=True
-            )
-            return
-
-        deck.add_max_cost(증가량)
-        logger.info(f"전투 중 최대 코스트 증가: {interaction.user.name} -> +{증가량}")
+        changed = deck.add_max_cost(증가량)
+        result_text = describe_delta(float(changed), "증가했습니다", "감소했습니다")
+        logger.info(f"전투 중 최대 코스트 증감: {interaction.user.name} -> {증가량} (실제 {changed})")
         await interaction.response.send_message(
-            f"{interaction.user.mention}님의 이번 전투 최대 코스트가 {증가량} 증가했습니다. (현재 최대 코스트: {deck.max_cost}, 보유 코스트: {format_cost(deck.current_cost)})",
+            f"{interaction.user.mention}님의 이번 전투 최대 코스트가 {result_text}. (현재 최대 코스트: {deck.max_cost}, 보유 코스트: {format_cost(deck.current_cost)})",
             ephemeral=False,
         )
 

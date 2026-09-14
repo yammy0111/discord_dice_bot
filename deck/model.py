@@ -74,6 +74,7 @@ class Deck:
     - 카드 소모 코스트: 음이 아닌 정수 (0, 1, 2, ...)
     - 코스트 보유량 (current_cost): 음이 아닌 유리수 (0, 0.5, 1.25, ...)
     - 최대 코스트 (max_cost): 자연수 (1, 2, 3, ...)
+    - 전투 중 최대 코스트 보정값 (bonus_max_cost): 정수, 단 최종 최대 코스트는 1 이상
     """
 
     MAX_DECK_SIZE: int = 9
@@ -86,41 +87,47 @@ class Deck:
         self.hand: list[Card] = []            # 현재 손에 든 패
 
         # 코스트 시스템
-        self.base_max_cost: int = 10          # 기본 최대 코스트 (자연수 >= 1)
-        self.bonus_max_cost: int = 0          # 전투 중 증가된 최대 코스트 (음이 아닌 정수)
-        self.current_cost: float = 10.0       # 현재 코스트 보유량 (음이 아닌 유리수)
+        self.base_max_cost: int = 3           # 기본 최대 코스트 (자연수 >= 1)
+        self.bonus_max_cost: int = 0          # 전투 중 최대 코스트 보정값
+        self.current_cost: float = 3.0        # 현재 코스트 보유량 (음이 아닌 유리수)
 
     @property
     def max_cost(self) -> int:
         """현재 적용되는 최대 코스트 (기본 + 전투 중 증가분, 자연수)."""
-        return self.base_max_cost + self.bonus_max_cost
+        return max(1, self.base_max_cost + self.bonus_max_cost)
+
+    def clamp_current_cost(self) -> None:
+        """현재 코스트를 0 이상, 최대 코스트 이하로 보정합니다."""
+        self.current_cost = max(0.0, min(float(self.max_cost), self.current_cost))
 
     def set_base_max_cost(self, value: int) -> bool:
         """기본 최대 코스트를 설정합니다. (자연수 >= 1 만 허용)"""
         if value < 1:
             return False
         self.base_max_cost = int(value)
-        # 현재 코스트가 최대치를 초과하지 않도록 조정
-        if self.current_cost > self.max_cost:
-            self.current_cost = float(self.max_cost)
+        self.clamp_current_cost()
         return True
 
-    def add_max_cost(self, amount: int) -> bool:
-        """이번 전투 동안 최대 코스트를 증가시킵니다. (자연수 >= 1 만 허용)"""
-        if amount < 1:
-            return False
+    def add_max_cost(self, amount: int) -> int:
+        """이번 전투 동안 최대 코스트를 증감합니다.
+
+        최대 코스트는 1 미만으로 내려가지 않으며, 반환값은 실제 증감량입니다.
+        """
+        old_max = self.max_cost
         self.bonus_max_cost += int(amount)
-        return True
+        if self.base_max_cost + self.bonus_max_cost < 1:
+            self.bonus_max_cost = 1 - self.base_max_cost
+        self.clamp_current_cost()
+        return self.max_cost - old_max
 
     def restore_cost(self, amount: float) -> float:
-        """코스트를 일정 수치(양의 유리수)만큼 회복합니다.
+        """코스트를 일정 수치만큼 증감합니다.
 
-        반환값: 실제로 회복된 양
+        반환값: 실제로 변동된 양. 음수 입력 시 감소량도 음수로 반환합니다.
         """
-        if amount <= 0:
-            return 0.0
         old_cost = self.current_cost
-        self.current_cost = min(float(self.max_cost), self.current_cost + float(amount))
+        self.current_cost += float(amount)
+        self.clamp_current_cost()
         return self.current_cost - old_cost
 
     def modify_hand_card_cost(
@@ -368,4 +375,3 @@ class Deck:
         self.original_cards.clear()
         self.cards.clear()
         self.hand.clear()
-
