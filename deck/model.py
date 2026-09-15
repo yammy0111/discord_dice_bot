@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 import re
+from typing import Any
 
 
 class Card:
@@ -21,6 +22,24 @@ class Card:
         c = Card(self.name, self.base_cost, self.description)
         c.cost = self.cost
         return c
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "cost": self.cost,
+            "base_cost": self.base_cost,
+            "description": self.description,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Card:
+        card = cls(
+            str(data.get("name", "")),
+            int(data.get("base_cost", data.get("cost", 0))),
+            str(data.get("description", "")),
+        )
+        card.cost = max(0, int(data.get("cost", card.base_cost)))
+        return card
 
     def __repr__(self) -> str:
         return f"Card({self.name}, cost={self.cost}, desc='{self.description}')"
@@ -60,9 +79,13 @@ def format_cost(val: float) -> str:
 
 
 def format_card_display(name: str, cost: int, description: str = "") -> str:
-    """요청된 양식대로 카드 정보를 포맷합니다."""
+    """요청된 양식대로 카드 정보를 포맷합니다:
+    [카드 이름]
+    (숫자)
+    "카드 설명"
+    """
     desc = f'"{description}"' if description else '""'
-    return f"[{name}] ({cost}) {desc}"
+    return f"[{name}]\n({cost})\n{desc}"
 
 
 
@@ -90,6 +113,41 @@ class Deck:
         self.base_max_cost: int = 3           # 기본 최대 코스트 (자연수 >= 1)
         self.bonus_max_cost: int = 0          # 전투 중 최대 코스트 보정값
         self.current_cost: float = 3.0        # 현재 코스트 보유량 (음이 아닌 유리수)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "owner_id": self.owner_id,
+            "original_cards": [card.to_dict() for card in self.original_cards],
+            "cards": [card.to_dict() for card in self.cards],
+            "hand": [card.to_dict() for card in self.hand],
+            "base_max_cost": self.base_max_cost,
+            "bonus_max_cost": self.bonus_max_cost,
+            "current_cost": self.current_cost,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Deck:
+        deck = cls(owner_id=int(data["owner_id"]))
+        deck.original_cards = [
+            Card.from_dict(card)
+            for card in data.get("original_cards", [])
+            if isinstance(card, dict)
+        ]
+        deck.cards = [
+            Card.from_dict(card)
+            for card in data.get("cards", [])
+            if isinstance(card, dict)
+        ]
+        deck.hand = [
+            Card.from_dict(card)
+            for card in data.get("hand", [])
+            if isinstance(card, dict)
+        ]
+        deck.base_max_cost = max(1, int(data.get("base_max_cost", 3)))
+        deck.bonus_max_cost = int(data.get("bonus_max_cost", 0))
+        deck.current_cost = float(data.get("current_cost", deck.base_max_cost))
+        deck.clamp_current_cost()
+        return deck
 
     @property
     def max_cost(self) -> int:
@@ -188,6 +246,22 @@ class Deck:
                 self.cards.remove(card)
                 break
         return removed
+
+    def remove_card_at(self, deck_index: int) -> Card | None:
+        """등록된 원본 덱 위치를 지정해 카드 1장을 제거하고 제거된 카드를 반환합니다."""
+        if deck_index < 0 or deck_index >= len(self.original_cards):
+            return None
+
+        removed_card = self.original_cards.pop(deck_index)
+        for card in list(self.cards):
+            if (
+                card.name == removed_card.name
+                and card.base_cost == removed_card.base_cost
+                and card.description == removed_card.description
+            ):
+                self.cards.remove(card)
+                break
+        return removed_card
 
     def get_card(self, card_name: str) -> Card | None:
         """등록된 카드, 현재 덱, 패에서 일치하는 카드를 검색하여 반환합니다."""

@@ -11,8 +11,13 @@ from utils.logger import setup_logger
 logger = setup_logger("DeckCog")
 
 
+def make_compact_card_label(card: Card) -> str:
+    desc = f' "{card.description}"' if card.description else ""
+    return f"[{card.name}] ({card.cost}){desc}"
+
+
 def make_choice_name(card: Card, index: int) -> str:
-    label = f"{index + 1}. {format_card_display(card.name, card.cost, card.description)}"
+    label = f"{index + 1}. {make_compact_card_label(card)}"
     return label if len(label) <= 100 else f"{label[:97]}..."
 
 
@@ -216,6 +221,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
             deck.add_card(c_name, c_cost, c_desc)
             added_cards.append(Card(c_name, c_cost, c_desc))
 
+        deck_manager.save_deck(interaction.user.id)
         logger.info(f"카드 추가: {interaction.user.name} -> {added_cards}")
 
         if len(raw_names) == 1 and len(added_cards) == 1:
@@ -229,12 +235,55 @@ class DeckCog(commands.Cog, name="카드 덱"):
             lines = []
             for c in added_cards:
                 lines.append(format_card_display(c.name, c.cost, c.description))
-            added_str = "\n".join(lines)
+            added_str = "\n\n".join(lines)
             msg = f"카드 {len(added_cards)}장이 덱에 추가되었습니다:\n{added_str}\n- 현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장"
             if len(added_cards) < len(raw_names):
                 msg += f"\n(덱 최대 매수 {deck.MAX_DECK_SIZE}장 제한으로 인해 {len(raw_names) - len(added_cards)}장은 추가되지 않았습니다.)"
 
         await interaction.response.send_message(msg, ephemeral=비밀)
+
+    @app_commands.command(name="카드제거", description="덱에서 원하는 카드를 1장 제거합니다.")
+    @app_commands.describe(
+        카드이름="제거할 카드 이름 (자동완성 지원)",
+        비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
+    )
+    @app_commands.autocomplete(카드이름=all_deck_cards_autocomplete)
+    async def remove_card(
+        self, interaction: discord.Interaction, 카드이름: str, 비밀: bool = False
+    ):
+        deck = deck_manager.get_deck(interaction.user.id)
+        if not deck or not deck.original_cards:
+            await interaction.response.send_message(
+                "[안내] 등록된 덱 카드가 없습니다. 먼저 '/카드추가'로 카드를 넣어주세요.",
+                ephemeral=True,
+            )
+            return
+
+        target_name = 카드이름.strip()
+        removed_card = next(
+            (card for card in deck.original_cards if card.name == target_name),
+            None,
+        )
+        if not removed_card:
+            await interaction.response.send_message(
+                f"[오류] 덱에 '{target_name}' 카드가 등록되어 있지 않습니다.",
+                ephemeral=True,
+            )
+            return
+
+        removed_display = format_card_display(
+            removed_card.name, removed_card.base_cost, removed_card.description
+        )
+        deck.remove_card(target_name)
+        deck_manager.save_deck(interaction.user.id)
+        logger.info(f"카드 제거: {interaction.user.name} -> {target_name}")
+
+        await interaction.response.send_message(
+            f"{interaction.user.mention}님의 덱에서 카드를 제거했습니다:\n"
+            f"{removed_display}\n"
+            f"- 현재 덱: {len(deck.original_cards)}/{deck.MAX_DECK_SIZE}장",
+            ephemeral=비밀,
+        )
 
     @app_commands.command(name="카드뽑기", description="덱에서 카드를 뽑아 패로 가져옵니다. (패 최대 9장)")
     @app_commands.describe(
@@ -272,7 +321,8 @@ class DeckCog(commands.Cog, name="카드 덱"):
             return
 
         drawn, refilled = deck.draw_card(장수)
-        drawn_str = "\n".join(
+        deck_manager.save_deck(interaction.user.id)
+        drawn_str = "\n\n".join(
             format_card_display(c.name, c.cost, c.description) for c in drawn
         )
         logger.info(f"카드 드로우: {interaction.user.name} -> {len(drawn)}장 (초기화 여부: {refilled})")
@@ -370,6 +420,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
         else:
             success, reason, card = deck.use_card(target_name, target_cost=target_cost)
         if success and card:
+            deck_manager.save_deck(interaction.user.id)
             logger.info(f"카드 사용: {interaction.user.name} -> '{card.name}' ({card.cost})")
             card_box = format_card_display(card.name, card.cost, card.description)
             await interaction.response.send_message(
@@ -409,7 +460,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
         orig_cards = deck.registered_deck()
         display_limit = 20
         deck_display = (
-            "\n".join(
+            "\n\n".join(
                 format_card_display(c.name, c.cost, c.description)
                 for c in cards[:display_limit]
             )
@@ -417,14 +468,14 @@ class DeckCog(commands.Cog, name="카드 덱"):
             else "(고갈됨 - 뽑기 시 자동 초기화)"
         )
         if len(cards) > display_limit:
-            deck_display += f" 외 {len(cards) - display_limit}장..."
+            deck_display += f"\n\n외 {len(cards) - display_limit}장..."
 
-        orig_display = "\n".join(
+        orig_display = "\n\n".join(
             format_card_display(c.name, c.base_cost, c.description)
             for c in orig_cards[:display_limit]
         )
         if len(orig_cards) > display_limit:
-            orig_display += f" 외 {len(orig_cards) - display_limit}장..."
+            orig_display += f"\n\n외 {len(orig_cards) - display_limit}장..."
 
         embed = discord.Embed(
             title=f"{interaction.user.display_name}님의 덱 정보",
@@ -466,6 +517,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
 
         if view.value is True:
             deck.reset_deck_and_hand()
+            deck_manager.save_deck(interaction.user.id)
             logger.info(f"덱과 패 초기화: {interaction.user.name}")
             await interaction.edit_original_response(
                 content="[안내] 덱과 패 초기화가 완료되었습니다.",
@@ -493,6 +545,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
             return
 
         deck.refill_deck()
+        deck_manager.save_deck(interaction.user.id)
         logger.info(f"덱 리필: {interaction.user.name}")
         await interaction.response.send_message(
             f"{interaction.user.mention}님이 패는 그대로 두고 덱만 원래 등록된 카드로 다시 채웠습니다. (현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장, 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장)",
@@ -512,6 +565,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
             return
 
         deck.set_base_max_cost(최댓값)
+        deck_manager.save_deck(interaction.user.id)
         logger.info(f"기본 최대 코스트 설정: {interaction.user.name} -> {최댓값}")
         await interaction.response.send_message(
             f"{interaction.user.mention}님의 기본 최대 코스트가 {최댓값}(으)로 설정되었습니다. (현재 코스트: {format_cost(deck.current_cost)}/{deck.max_cost})",
@@ -528,6 +582,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
     ):
         deck = deck_manager.get_or_create_deck(interaction.user.id)
         changed = deck.restore_cost(수치)
+        deck_manager.save_deck(interaction.user.id)
         result_text = describe_delta(changed, "회복되었습니다", "감소했습니다")
         logger.info(f"코스트 증감: {interaction.user.name} -> {수치} (실제 {changed})")
         await interaction.response.send_message(
@@ -540,6 +595,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
     async def add_max_cost(self, interaction: discord.Interaction, 수치: int = 1):
         deck = deck_manager.get_or_create_deck(interaction.user.id)
         changed = deck.add_max_cost(수치)
+        deck_manager.save_deck(interaction.user.id)
         result_text = describe_delta(float(changed), "증가했습니다", "감소했습니다")
         logger.info(f"전투 중 최대 코스트 증감: {interaction.user.name} -> {수치} (실제 {changed})")
         await interaction.response.send_message(
@@ -594,6 +650,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
             changed = changed_card is not None
 
         if changed:
+            deck_manager.save_deck(interaction.user.id)
             logger.info(
                 f"패 카드 코스트 변경: {interaction.user.name} -> {target_name} : {변경할코스트}"
             )
@@ -684,6 +741,7 @@ class DeckCog(commands.Cog, name="카드 덱"):
 
         updated = deck.update_card_info(카드이름, cost=코스트, description=설명)
         if updated:
+            deck_manager.save_deck(interaction.user.id)
             card = deck.get_card(카드이름)
             logger.info(f"카드 정보 수정: {interaction.user.name} -> {카드이름}")
             card_display = (
