@@ -11,15 +11,22 @@ class Card:
     소모 코스트는 '음이 아닌 정수' (cost >= 0) 입니다.
     """
 
-    def __init__(self, name: str, cost: int = 0, description: str = ""):
+    def __init__(
+        self,
+        name: str,
+        cost: int = 0,
+        description: str = "",
+        is_temporary: bool = False,
+    ):
         self.name = name.strip()
         self.cost: int = max(0, int(cost))
         self.base_cost: int = self.cost
         self.description: str = description.strip()
+        self.is_temporary: bool = bool(is_temporary)
 
     def clone(self) -> Card:
         """기본 코스트와 설명을 유지한 새 카드 인스턴스를 복제합니다."""
-        c = Card(self.name, self.base_cost, self.description)
+        c = Card(self.name, self.base_cost, self.description, self.is_temporary)
         c.cost = self.cost
         return c
 
@@ -29,6 +36,7 @@ class Card:
             "cost": self.cost,
             "base_cost": self.base_cost,
             "description": self.description,
+            "is_temporary": self.is_temporary,
         }
 
     @classmethod
@@ -37,12 +45,14 @@ class Card:
             str(data.get("name", "")),
             int(data.get("base_cost", data.get("cost", 0))),
             str(data.get("description", "")),
+            bool(data.get("is_temporary", False)),
         )
         card.cost = max(0, int(data.get("cost", card.base_cost)))
         return card
 
     def __repr__(self) -> str:
-        return f"Card({self.name}, cost={self.cost}, desc='{self.description}')"
+        temp_tag = ", temp=True" if self.is_temporary else ""
+        return f"Card({self.name}, cost={self.cost}, desc='{self.description}'{temp_tag})"
 
 
 def parse_card_input(card_str: str) -> tuple[str, int]:
@@ -88,6 +98,61 @@ def format_card_display(name: str, cost: int, description: str = "") -> str:
     return f"[{name}]\n({cost})\n{desc}"
 
 
+class SpecialCard:
+    """패/덱과 별개로 보관되는 특수 카드 (E.G.O, 환상체 책장 등).
+
+    - cost: 소모 코스트 (음이 아닌 정수 >= 0)
+    - description: 카드 설명
+    """
+
+    def __init__(
+        self,
+        name: str,
+        cost: int = 0,
+        description: str = "",
+    ):
+        self.name = name.strip()
+        self.cost: int = max(0, int(cost))
+        self.base_cost: int = self.cost
+        self.description: str = description.strip()
+
+    def clone(self) -> SpecialCard:
+        c = SpecialCard(self.name, self.base_cost, self.description)
+        c.cost = self.cost
+        return c
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "cost": self.cost,
+            "base_cost": self.base_cost,
+            "description": self.description,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SpecialCard:
+        card = cls(
+            name=str(data.get("name", "")),
+            cost=int(data.get("base_cost", data.get("cost", 0))),
+            description=str(data.get("description", "")),
+        )
+        card.cost = max(0, int(data.get("cost", card.base_cost)))
+        return card
+
+    def __repr__(self) -> str:
+        return f"SpecialCard({self.name}, cost={self.cost}, desc='{self.description}')"
+
+
+def format_special_card_display(card: SpecialCard) -> str:
+    """특수 카드 정보를 포맷합니다:
+    [카드 이름]
+    (숫자)
+    "카드 설명"
+    """
+    return format_card_display(card.name, card.cost, card.description)
+
+
+
 
 class Deck:
     """사용자별 덱, 패(Hand), 코스트(Cost)를 관리하는 클래스.
@@ -108,6 +173,7 @@ class Deck:
         self.original_cards: list[Card] = []  # 등록된 원본 덱 카드 목록
         self.cards: list[Card] = []           # 현재 덱에 남아있는 카드 목록
         self.hand: list[Card] = []            # 현재 손에 든 패
+        self.special_cards: list[SpecialCard] = []  # 패/덱과 분리된 특수 카드 목록
 
         # 코스트 시스템
         self.base_max_cost: int = 3           # 기본 최대 코스트 (자연수 >= 1)
@@ -120,6 +186,7 @@ class Deck:
             "original_cards": [card.to_dict() for card in self.original_cards],
             "cards": [card.to_dict() for card in self.cards],
             "hand": [card.to_dict() for card in self.hand],
+            "special_cards": [card.to_dict() for card in self.special_cards],
             "base_max_cost": self.base_max_cost,
             "bonus_max_cost": self.bonus_max_cost,
             "current_cost": self.current_cost,
@@ -141,6 +208,11 @@ class Deck:
         deck.hand = [
             Card.from_dict(card)
             for card in data.get("hand", [])
+            if isinstance(card, dict)
+        ]
+        deck.special_cards = [
+            SpecialCard.from_dict(card)
+            for card in data.get("special_cards", [])
             if isinstance(card, dict)
         ]
         deck.base_max_cost = max(1, int(data.get("base_max_cost", 3)))
@@ -232,6 +304,19 @@ class Deck:
         self.original_cards.append(card)
         self.cards.append(card.clone())
         return True
+
+    def add_temp_card(
+        self, card_name: str, cost: int = 0, description: str = ""
+    ) -> Card | None:
+        """패(Hand)에만 임시 카드를 1장 추가합니다.
+
+        덱(original_cards, cards)에는 등록되지 않으며, 패가 가득 찬 경우 추가되지 않고 None을 반환합니다.
+        """
+        if self.is_hand_full():
+            return None
+        card = Card(card_name, cost, description, is_temporary=True)
+        self.hand.append(card)
+        return card
 
     def remove_card(self, card_name: str) -> bool:
         """덱에서 특정 카드를 등록 해제합니다."""
@@ -444,8 +529,93 @@ class Deck:
         """원래 등록된 덱 카드 목록을 반환합니다."""
         return list(self.original_cards)
 
+    def current_special_cards(self) -> list[SpecialCard]:
+        """현재 보유 중인 특수 카드 목록을 반환합니다."""
+        return list(self.special_cards)
+
+    # --- 특수 카드 (Special Cards) 관리 ---
+
+    def add_special_card(
+        self,
+        card_name: str,
+        cost: int = 0,
+        description: str = "",
+    ) -> SpecialCard:
+        """패/덱과 분리된 특수 카드를 추가합니다."""
+        card = SpecialCard(card_name, cost, description)
+        self.special_cards.append(card)
+        return card
+
+    def remove_special_card(self, card_name: str) -> bool:
+        """특수 카드를 목록에서 제거합니다."""
+        for card in list(self.special_cards):
+            if card.name == card_name:
+                self.special_cards.remove(card)
+                return True
+        return False
+
+    def remove_special_card_at(self, index: int) -> SpecialCard | None:
+        """인덱스 위치의 특수 카드를 제거합니다."""
+        if index < 0 or index >= len(self.special_cards):
+            return None
+        return self.special_cards.pop(index)
+
+    def get_special_card(self, card_name: str) -> SpecialCard | None:
+        """이름으로 특수 카드를 검색합니다."""
+        for card in self.special_cards:
+            if card.name == card_name:
+                return card
+        return None
+
+    def use_special_card(self, card_name: str) -> tuple[bool, str, SpecialCard | None]:
+        """특수 카드를 사용합니다. (코스트 차감)
+
+        반환값: (성공 여부, 메시지, 사용된 SpecialCard)
+        """
+        card = self.get_special_card(card_name)
+        if not card:
+            return False, f"보유 중인 특수 카드 '{card_name}'이(가) 없습니다.", None
+
+        if self.current_cost < card.cost:
+            return False, "코스트가 부족합니다.", card
+
+        self.current_cost -= float(card.cost)
+        return True, "사용 성공", card
+
+    def use_special_card_at(self, index: int) -> tuple[bool, str, SpecialCard | None]:
+        """인덱스 위치의 특수 카드를 사용합니다."""
+        if index < 0 or index >= len(self.special_cards):
+            return False, "지정한 특수 카드가 없습니다.", None
+        card = self.special_cards[index]
+
+        if self.current_cost < card.cost:
+            return False, "코스트가 부족합니다.", card
+
+        self.current_cost -= float(card.cost)
+        return True, "사용 성공", card
+
+    def update_special_card_info(
+        self,
+        card_name: str,
+        cost: int | None = None,
+        description: str | None = None,
+    ) -> bool:
+        """특수 카드의 정보(코스트, 설명)를 수정합니다."""
+        card = self.get_special_card(card_name)
+        if not card:
+            return False
+
+        if cost is not None:
+            card.cost = max(0, int(cost))
+            card.base_cost = card.cost
+        if description is not None:
+            card.description = description.strip()
+        return True
+
     def clear(self) -> None:
-        """덱과 패를 모두 비웁니다."""
+        """덱과 패, 특수 카드를 모두 비웁니다."""
         self.original_cards.clear()
         self.cards.clear()
         self.hand.clear()
+        self.special_cards.clear()
+

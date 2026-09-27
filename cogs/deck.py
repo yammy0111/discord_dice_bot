@@ -4,7 +4,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from deck import Card, deck_manager, format_card_display, format_cost, parse_card_input
+from deck import (
+    Card,
+    SpecialCard,
+    deck_manager,
+    format_card_display,
+    format_cost,
+    format_special_card_display,
+    parse_card_input,
+)
 from utils.logger import setup_logger
 
 
@@ -101,7 +109,6 @@ class DeckCog(commands.Cog, name="카드 덱"):
 
         return choices[:25]
 
-
     async def all_deck_cards_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
@@ -121,6 +128,26 @@ class DeckCog(commands.Cog, name="카드 덱"):
                 choices.append(app_commands.Choice(name=name, value=name))
 
         return choices[:25]
+
+    async def special_cards_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """사용자의 보유 특수 카드를 자동완성 목록으로 제공합니다."""
+        deck = deck_manager.get_deck(interaction.user.id)
+        if not deck or not deck.special_cards:
+            return []
+
+        choices = []
+        lowered = current.lower()
+        for c in deck.special_cards:
+            if lowered in c.name.lower():
+                label = f"{c.name} (코스트 {c.cost})"
+                if len(label) > 100:
+                    label = f"{label[:97]}..."
+                choices.append(app_commands.Choice(name=label, value=c.name))
+
+        return choices[:25]
+
 
     # --- 슬래시 명령어 ---
 
@@ -239,6 +266,99 @@ class DeckCog(commands.Cog, name="카드 덱"):
             msg = f"카드 {len(added_cards)}장이 덱에 추가되었습니다:\n{added_str}\n- 현재 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장"
             if len(added_cards) < len(raw_names):
                 msg += f"\n(덱 최대 매수 {deck.MAX_DECK_SIZE}장 제한으로 인해 {len(raw_names) - len(added_cards)}장은 추가되지 않았습니다.)"
+
+        await interaction.response.send_message(msg, ephemeral=비밀)
+
+    @app_commands.command(
+        name="임시카드추가",
+        description="전투 중 패에만 임시 카드를 추가합니다. (사용하거나 덱 초기화 시 소멸, 패 최대 9장)",
+    )
+    @app_commands.describe(
+        이름="추가할 임시 카드 이름 목록 (쉼표 구분, 예: 임시불꽃, 포션)",
+        코스트="각 카드의 소모 코스트 목록 (쉼표 구분, 예: 1, 2 / 생략 시 0)",
+        설명="각 카드의 설명 목록 (쉼표 구분, 예: 이번 턴만 사용 가능 / 생략 시 없음)",
+        비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
+    )
+    async def add_temp_card(
+        self,
+        interaction: discord.Interaction,
+        이름: str,
+        코스트: str = "",
+        설명: str = "",
+        비밀: bool = False,
+    ):
+        deck = deck_manager.get_or_create_deck(interaction.user.id)
+        raw_names = [n.strip() for n in 이름.split(",") if n.strip()]
+
+        if not raw_names:
+            await interaction.response.send_message(
+                "[오류] 추가할 임시 카드 이름을 최소 1개 이상 입력해주세요.",
+                ephemeral=True,
+            )
+            return
+
+        available_slots = deck.MAX_HAND_SIZE - len(deck.hand)
+        if available_slots <= 0:
+            await interaction.response.send_message(
+                f"[오류] 패가 가득 찼습니다. (최대 {deck.MAX_HAND_SIZE}장) 더 이상 임시 카드를 추가할 수 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        raw_costs = [c.strip() for c in 코스트.split(",") if c.strip()] if 코스트 else []
+        raw_descs = [d.strip() for d in 설명.split(",") if d.strip()] if 설명 else []
+
+        n_cards = len(raw_names)
+        parsed_costs: list[int] = []
+        for i in range(n_cards):
+            if i < len(raw_costs):
+                try:
+                    c_val = int(raw_costs[i])
+                    parsed_costs.append(max(0, c_val))
+                except ValueError:
+                    parsed_costs.append(0)
+            else:
+                parsed_costs.append(0)
+
+        parsed_descs: list[str] = []
+        for i in range(n_cards):
+            if i < len(raw_descs):
+                parsed_descs.append(raw_descs[i])
+            else:
+                parsed_descs.append("")
+
+        added_cards: list[Card] = []
+        for i in range(min(n_cards, available_slots)):
+            c_name = raw_names[i]
+            c_cost = parsed_costs[i]
+            c_desc = parsed_descs[i]
+            temp_card = deck.add_temp_card(c_name, c_cost, c_desc)
+            if temp_card:
+                added_cards.append(temp_card)
+
+        deck_manager.save_deck(interaction.user.id)
+        logger.info(f"임시 카드 추가: {interaction.user.name} -> {added_cards}")
+
+        if len(raw_names) == 1 and len(added_cards) == 1:
+            c = added_cards[0]
+            msg = (
+                f"임시 카드가 패에 추가되었습니다:\n"
+                f"{format_card_display(c.name, c.cost, c.description)}\n"
+                f"- 현재 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장 (사용하거나 전투 종료/덱초기화 시 소멸)"
+            )
+        else:
+            lines = [
+                format_card_display(c.name, c.cost, c.description)
+                for c in added_cards
+            ]
+            added_str = "\n\n".join(lines)
+            msg = (
+                f"임시 카드 {len(added_cards)}장이 패에 추가되었습니다:\n"
+                f"{added_str}\n"
+                f"- 현재 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장 (사용하거나 전투 종료/덱초기화 시 소멸)"
+            )
+            if len(added_cards) < len(raw_names):
+                msg += f"\n(패 최대 매수 {deck.MAX_HAND_SIZE}장 제한으로 인해 {len(raw_names) - len(added_cards)}장은 추가되지 않았습니다.)"
 
         await interaction.response.send_message(msg, ephemeral=비밀)
 
@@ -756,6 +876,262 @@ class DeckCog(commands.Cog, name="카드 덱"):
         else:
             await interaction.response.send_message(
                 f"[오류] 덱에 '{카드이름}' 카드가 등록되어 있지 않습니다.", ephemeral=True
+            )
+
+    # --- 특수 카드 (Special Cards) 슬래시 명령어 ---
+
+    @app_commands.command(
+        name="특수카드추가",
+        description="패/덱과 분리된 특수 카드(환상체 책장, E.G.O 등)를 추가합니다.",
+    )
+    @app_commands.describe(
+        이름="추가할 특수 카드 이름 목록 (쉼표 구분, 예: 갈증, 푸리오소)",
+        코스트="각 카드의 소모 코스트 목록 (쉼표 구분, 예: 2, 4 / 생략 시 0)",
+        설명="각 카드의 설명 목록 (쉼표 구분, 예: 모든 적에게 피해 / 생략 시 없음)",
+        비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
+    )
+    async def add_special_card(
+        self,
+        interaction: discord.Interaction,
+        이름: str,
+        코스트: str = "",
+        설명: str = "",
+        비밀: bool = False,
+    ):
+        deck = deck_manager.get_or_create_deck(interaction.user.id)
+        raw_names = [n.strip() for n in 이름.split(",") if n.strip()]
+
+        if not raw_names:
+            await interaction.response.send_message(
+                "[오류] 추가할 특수 카드 이름을 최소 1개 이상 입력해주세요.",
+                ephemeral=True,
+            )
+            return
+
+        raw_costs = [c.strip() for c in 코스트.split(",") if c.strip()] if 코스트 else []
+        raw_descs = [d.strip() for d in 설명.split(",") if d.strip()] if 설명 else []
+
+        n_cards = len(raw_names)
+        parsed_costs: list[int] = []
+        for i in range(n_cards):
+            if i < len(raw_costs):
+                try:
+                    parsed_costs.append(max(0, int(raw_costs[i])))
+                except ValueError:
+                    parsed_costs.append(0)
+            else:
+                parsed_costs.append(0)
+
+        parsed_descs: list[str] = []
+        for i in range(n_cards):
+            if i < len(raw_descs):
+                parsed_descs.append(raw_descs[i])
+            else:
+                parsed_descs.append("")
+
+        added_cards: list[SpecialCard] = []
+        for i in range(n_cards):
+            c_name = raw_names[i]
+            c_cost = parsed_costs[i]
+            c_desc = parsed_descs[i]
+            card = deck.add_special_card(c_name, cost=c_cost, description=c_desc)
+            added_cards.append(card)
+
+        deck_manager.save_deck(interaction.user.id)
+        logger.info(f"특수 카드 추가: {interaction.user.name} -> {added_cards}")
+
+        if len(added_cards) == 1:
+            c = added_cards[0]
+            msg = (
+                f"특수 카드가 등록되었습니다:\n"
+                f"{format_special_card_display(c)}\n"
+                f"- 보유 특수 카드: {len(deck.special_cards)}장"
+            )
+        else:
+            lines = [format_special_card_display(c) for c in added_cards]
+            added_str = "\n\n".join(lines)
+            msg = (
+                f"특수 카드 {len(added_cards)}장이 등록되었습니다:\n"
+                f"{added_str}\n"
+                f"- 보유 특수 카드: {len(deck.special_cards)}장"
+            )
+
+        await interaction.response.send_message(msg, ephemeral=비밀)
+
+    @app_commands.command(name="특수카드확인", description="보유 중인 특수 카드 목록을 확인합니다.")
+    @app_commands.describe(비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)")
+    async def check_special_cards(
+        self, interaction: discord.Interaction, 비밀: bool = False
+    ):
+        deck = deck_manager.get_deck(interaction.user.id)
+        if not deck or not deck.special_cards:
+            await interaction.response.send_message(
+                "[안내] 보유 중인 특수 카드가 없습니다. '/특수카드추가'로 카드를 등록해보세요.",
+                ephemeral=True,
+            )
+            return
+
+        blocks = [format_special_card_display(c) for c in deck.special_cards]
+        display_text = "\n\n".join(blocks)
+
+        embed = discord.Embed(
+            title=f"{interaction.user.display_name}님의 특수 카드 정보 (총 {len(deck.special_cards)}장)",
+            color=discord.Color.gold(),
+        )
+        embed.add_field(
+            name="보유 코스트",
+            value=f"{format_cost(deck.current_cost)} / {deck.max_cost}",
+            inline=False,
+        )
+        embed.add_field(
+            name="특수 카드 목록",
+            value=display_text,
+            inline=False,
+        )
+
+        await interaction.response.send_message(embed=embed, ephemeral=비밀)
+
+    @app_commands.command(name="특수카드목록", description="보유 중인 특수 카드 목록을 확인합니다. (/특수카드확인과 동일)")
+    @app_commands.describe(비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)")
+    async def list_special_cards(
+        self, interaction: discord.Interaction, 비밀: bool = False
+    ):
+        await self.check_special_cards(interaction, 비밀=비밀)
+
+    @app_commands.command(name="특수카드사용", description="보유 중인 특수 카드를 1장 사용합니다. (코스트 차감)")
+    @app_commands.describe(카드이름="사용할 특수 카드의 이름 (자동완성 지원)")
+    @app_commands.autocomplete(카드이름=special_cards_autocomplete)
+    async def use_special_card(
+        self, interaction: discord.Interaction, 카드이름: str
+    ):
+        deck = deck_manager.get_deck(interaction.user.id)
+        if not deck or not deck.special_cards:
+            await interaction.response.send_message(
+                "[안내] 보유 중인 특수 카드가 없습니다.", ephemeral=True
+            )
+            return
+
+        target_name = 카드이름.strip()
+        success, reason, card = deck.use_special_card(target_name)
+        if success and card:
+            deck_manager.save_deck(interaction.user.id)
+            logger.info(f"특수 카드 사용: {interaction.user.name} -> {target_name}")
+            card_box = format_special_card_display(card)
+            await interaction.response.send_message(
+                f"{interaction.user.mention}님이 특수 카드를 사용했습니다:\n{card_box}\n"
+                f"- 잔여 코스트: {format_cost(deck.current_cost)}/{deck.max_cost}",
+                ephemeral=False,
+            )
+        else:
+            if reason == "코스트가 부족합니다." and card:
+                await interaction.response.send_message(
+                    f"[오류] 코스트가 부족합니다. (필요: {card.cost}, 보유: {format_cost(deck.current_cost)}/{deck.max_cost})",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    f"[오류] 보유 중인 특수 카드에 '{target_name}' 카드가 없습니다. '/특수카드확인'으로 확인해보세요.",
+                    ephemeral=True,
+                )
+
+    @app_commands.command(name="특수카드제거", description="보유 중인 특수 카드를 1장 제거합니다.")
+    @app_commands.describe(
+        카드이름="제거할 특수 카드 이름 (자동완성 지원)",
+        비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
+    )
+    @app_commands.autocomplete(카드이름=special_cards_autocomplete)
+    async def remove_special_card(
+        self, interaction: discord.Interaction, 카드이름: str, 비밀: bool = False
+    ):
+        deck = deck_manager.get_deck(interaction.user.id)
+        if not deck or not deck.special_cards:
+            await interaction.response.send_message(
+                "[안내] 보유 중인 특수 카드가 없습니다.", ephemeral=True
+            )
+            return
+
+        target_name = 카드이름.strip()
+        removed_card = deck.get_special_card(target_name)
+        if not removed_card:
+            await interaction.response.send_message(
+                f"[오류] 특수 카드 목록에 '{target_name}' 카드가 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        removed_display = format_special_card_display(removed_card)
+        deck.remove_special_card(target_name)
+        deck_manager.save_deck(interaction.user.id)
+        logger.info(f"특수 카드 제거: {interaction.user.name} -> {target_name}")
+
+        await interaction.response.send_message(
+            f"{interaction.user.mention}님의 특수 카드를 제거했습니다:\n"
+            f"{removed_display}\n"
+            f"- 남은 특수 카드: {len(deck.special_cards)}장",
+            ephemeral=비밀,
+        )
+
+    @app_commands.command(name="특수카드삭제", description="보유 중인 특수 카드를 1장 삭제합니다. (/특수카드제거와 동일)")
+    @app_commands.describe(
+        카드이름="삭제할 특수 카드 이름 (자동완성 지원)",
+        비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
+    )
+    @app_commands.autocomplete(카드이름=special_cards_autocomplete)
+    async def delete_special_card(
+        self, interaction: discord.Interaction, 카드이름: str, 비밀: bool = False
+    ):
+        await self.remove_special_card(interaction, 카드이름=카드이름, 비밀=비밀)
+
+    @app_commands.command(name="특수카드정보설정", description="이미 등록된 특수 카드의 코스트나 설명을 수정합니다.")
+    @app_commands.describe(
+        카드이름="정보를 수정할 특수 카드 이름",
+        코스트="새로 지정할 기본 소모 코스트 (음이 아닌 정수, 생략 시 유지)",
+        설명="새로 지정할 설명 (생략 시 유지)",
+    )
+    @app_commands.autocomplete(카드이름=special_cards_autocomplete)
+    async def update_special_card_info(
+        self,
+        interaction: discord.Interaction,
+        카드이름: str,
+        코스트: int | None = None,
+        설명: str | None = None,
+    ):
+        deck = deck_manager.get_deck(interaction.user.id)
+        if not deck or not deck.special_cards:
+            await interaction.response.send_message(
+                "[안내] 보유 중인 특수 카드가 없습니다.", ephemeral=True
+            )
+            return
+
+        if 설명 is None and 코스트 is None:
+            await interaction.response.send_message(
+                "[오류] 수정할 항목(코스트, 설명) 중 최소 하나는 입력해야 합니다.",
+                ephemeral=True,
+            )
+            return
+
+        if 코스트 is not None and 코스트 < 0:
+            await interaction.response.send_message(
+                "[오류] 코스트는 0 이상의 정수여야 합니다.", ephemeral=True
+            )
+            return
+
+        updated = deck.update_special_card_info(
+            카드이름,
+            cost=코스트,
+            description=설명,
+        )
+        if updated:
+            deck_manager.save_deck(interaction.user.id)
+            card = deck.get_special_card(카드이름)
+            card_display = format_special_card_display(card) if card else f"[{카드이름}]"
+            await interaction.response.send_message(
+                f"{interaction.user.mention}님의 특수 카드 정보가 수정되었습니다:\n{card_display}",
+                ephemeral=False,
+            )
+        else:
+            await interaction.response.send_message(
+                f"[오류] 특수 카드 목록에 '{카드이름}' 카드가 없습니다.", ephemeral=True
             )
 
 
