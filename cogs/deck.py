@@ -733,9 +733,15 @@ class DeckCog(commands.Cog, name="카드 덱"):
             await interaction.response.send_message(f"[오류] {reason}", ephemeral=True)
 
     @app_commands.command(name="패확인", description="현재 내 손(패)에 있는 카드 목록과 코스트를 확인합니다.")
-    @app_commands.describe(비밀="나에게만 패를 표시할지 여부 (기본값: False, 공개)")
+    @app_commands.describe(
+        상세="카드의 상세 설명(효과)을 함께 표시할지 여부 (기본값: False, 비표시)",
+        비밀="나에게만 패를 표시할지 여부 (기본값: False, 공개)",
+    )
     async def check_hand(
-        self, interaction: discord.Interaction, 비밀: bool = False
+        self,
+        interaction: discord.Interaction,
+        상세: bool = False,
+        비밀: bool = False,
     ):
         deck = deck_manager.get_deck(interaction.user.id)
         if not deck:
@@ -750,9 +756,12 @@ class DeckCog(commands.Cog, name="카드 덱"):
         else:
             blocks = []
             for i, card in enumerate(hand_cards):
-                card_str = format_card_display(card.name, card.cost, card.description)
+                card_str = format_card_display(
+                    card.name, card.cost, card.description, show_detail=상세
+                )
                 blocks.append(f"{i + 1}. {card_str}")
-            hand_display = "\n\n".join(blocks)
+            sep = "\n\n" if 상세 else "\n"
+            hand_display = sep.join(blocks)
 
         embed = discord.Embed(
             title=f"{interaction.user.display_name}님의 패 정보 ({len(hand_cards)}/{deck.MAX_HAND_SIZE}장)",
@@ -831,11 +840,76 @@ class DeckCog(commands.Cog, name="카드 덱"):
                     ephemeral=True,
                 )
 
+    @app_commands.command(name="카드버리기", description="패에서 카드를 1장 버립니다. (코스트 소모 없음)")
+    @app_commands.describe(
+        카드이름="버릴 카드의 이름 (자동완성 지원, 코스트별 개별 선택 가능)",
+        비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
+    )
+    @app_commands.autocomplete(카드이름=hand_card_autocomplete)
+    async def discard_card(
+        self, interaction: discord.Interaction, 카드이름: str, 비밀: bool = False
+    ):
+        deck = deck_manager.get_deck(interaction.user.id)
+        if not deck:
+            await interaction.response.send_message(
+                "[안내] 먼저 '/덱생성' 명령어로 덱을 생성해주세요.", ephemeral=True
+            )
+            return
+
+        # 자동완성 값 파싱: 'hand:패번호' 형태이거나 일반 '이름' 형태
+        target_name = 카드이름.strip()
+        target_cost: int | None = None
+        hand_index: int | None = None
+        if target_name.startswith("hand:") and target_name[5:].isdigit():
+            hand_index = int(target_name[5:])
+        elif ":" in target_name:
+            parts = target_name.rsplit(":", 1)
+            if parts[1].strip().isdigit():
+                target_name = parts[0].strip()
+                target_cost = int(parts[1].strip())
+
+        if hand_index is None and target_cost is None and deck.has_multiple_hand_variants(target_name):
+            await interaction.response.send_message(
+                "[안내] 패에 같은 이름의 카드가 여러 종류 있습니다. 자동완성 목록에서 버릴 카드를 선택해주세요.\n"
+                f"{deck.hand_variants_text(target_name)}",
+                ephemeral=True,
+            )
+            return
+
+        if hand_index is not None:
+            success, reason, card = deck.discard_card_at(hand_index)
+        else:
+            success, reason, card = deck.discard_card(target_name, target_cost=target_cost)
+
+        if success and card:
+            deck_manager.save_deck(interaction.user.id)
+            logger.info(f"카드 버리기: {interaction.user.name} -> '{card.name}' ({card.cost})")
+            card_box = format_card_display(card.name, card.cost, card.description)
+            await interaction.response.send_message(
+                f"{interaction.user.mention}님이 패에서 카드를 버렸습니다:\n{card_box}\n"
+                f"- 남은 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장 | 보유 코스트: {format_cost(deck.current_cost)}/{deck.max_cost}",
+                ephemeral=비밀,
+            )
+        else:
+            if "패에 코스트" in reason:
+                await interaction.response.send_message(f"[오류] {reason}", ephemeral=True)
+            else:
+                await interaction.response.send_message(
+                    f"[오류] 패에 '{target_name}' 카드가 없습니다. '/패확인'으로 현재 패를 확인해보세요.",
+                    ephemeral=True,
+                )
+
 
     @app_commands.command(name="덱확인", description="현재 내 덱에 남은 카드 목록과 장수를 확인합니다.")
-    @app_commands.describe(비밀="나에게만 덱 정보를 표시할지 여부 (기본값: False, 공개)")
+    @app_commands.describe(
+        상세="카드의 상세 설명(효과)을 함께 표시할지 여부 (기본값: False, 비표시)",
+        비밀="나에게만 덱 정보를 표시할지 여부 (기본값: False, 공개)",
+    )
     async def check_deck(
-        self, interaction: discord.Interaction, 비밀: bool = False
+        self,
+        interaction: discord.Interaction,
+        상세: bool = False,
+        비밀: bool = False,
     ):
         deck = deck_manager.get_deck(interaction.user.id)
         if not deck or not deck.original_cards:
@@ -848,9 +922,12 @@ class DeckCog(commands.Cog, name="카드 덱"):
         cards = deck.current_deck()
         orig_cards = deck.registered_deck()
         display_limit = 20
+        sep = "\n\n" if 상세 else "\n"
         deck_display = (
-            "\n\n".join(
-                format_card_display(c.name, c.cost, c.description)
+            sep.join(
+                format_card_display(
+                    c.name, c.cost, c.description, show_detail=상세
+                )
                 for c in cards[:display_limit]
             )
             if cards
@@ -859,8 +936,10 @@ class DeckCog(commands.Cog, name="카드 덱"):
         if len(cards) > display_limit:
             deck_display += f"\n\n외 {len(cards) - display_limit}장..."
 
-        orig_display = "\n\n".join(
-            format_card_display(c.name, c.base_cost, c.description)
+        orig_display = sep.join(
+            format_card_display(
+                c.name, c.base_cost, c.description, show_detail=상세
+            )
             for c in orig_cards[:display_limit]
         )
         if len(orig_cards) > display_limit:
@@ -1228,9 +1307,15 @@ class DeckCog(commands.Cog, name="카드 덱"):
         await interaction.response.send_message(msg, ephemeral=비밀)
 
     @app_commands.command(name="특수카드확인", description="보유 중인 특수 카드 목록을 확인합니다.")
-    @app_commands.describe(비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)")
+    @app_commands.describe(
+        상세="카드의 상세 설명(효과)을 함께 표시할지 여부 (기본값: False, 비표시)",
+        비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
+    )
     async def check_special_cards(
-        self, interaction: discord.Interaction, 비밀: bool = False
+        self,
+        interaction: discord.Interaction,
+        상세: bool = False,
+        비밀: bool = False,
     ):
         deck = deck_manager.get_deck(interaction.user.id)
         if not deck or not deck.special_cards:
@@ -1240,8 +1325,12 @@ class DeckCog(commands.Cog, name="카드 덱"):
             )
             return
 
-        blocks = [format_special_card_display(c) for c in deck.special_cards]
-        display_text = "\n\n".join(blocks)
+        blocks = [
+            format_special_card_display(c, show_detail=상세)
+            for c in deck.special_cards
+        ]
+        sep = "\n\n" if 상세 else "\n"
+        display_text = sep.join(blocks)
 
         embed = discord.Embed(
             title=f"{interaction.user.display_name}님의 특수 카드 정보 (총 {len(deck.special_cards)}장)",

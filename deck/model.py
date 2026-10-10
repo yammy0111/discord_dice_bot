@@ -88,14 +88,22 @@ def format_cost(val: float) -> str:
     return f"{val:.2f}".rstrip("0").rstrip(".")
 
 
-def format_card_display(name: str, cost: int, description: str = "") -> str:
+def format_card_display(
+    name: str, cost: int, description: str = "", show_detail: bool = True
+) -> str:
     """요청된 양식대로 카드 정보를 포맷합니다:
+    상세(show_detail=True):
     [카드 이름]
     (숫자)
     "카드 설명"
+
+    비상세(show_detail=False):
+    [카드 이름] (숫자)
     """
-    desc = f'"{description}"' if description else '""'
-    return f"[{name}]\n({cost})\n{desc}"
+    if show_detail:
+        desc = f'"{description}"' if description else '""'
+        return f"[{name}]\n({cost})\n{desc}"
+    return f"[{name}] ({cost})"
 
 
 class SpecialCard:
@@ -143,13 +151,13 @@ class SpecialCard:
         return f"SpecialCard({self.name}, cost={self.cost}, desc='{self.description}')"
 
 
-def format_special_card_display(card: SpecialCard) -> str:
+def format_special_card_display(card: SpecialCard, show_detail: bool = True) -> str:
     """특수 카드 정보를 포맷합니다:
     [카드 이름]
     (숫자)
     "카드 설명"
     """
-    return format_card_display(card.name, card.cost, card.description)
+    return format_card_display(card.name, card.cost, card.description, show_detail=show_detail)
 
 
 
@@ -580,6 +588,38 @@ class Deck:
         self.current_cost -= float(target_card.cost)
         self.hand.pop(hand_index)
         return True, "사용 성공", target_card
+
+    def discard_card(
+        self, card_name: str, target_cost: int | None = None
+    ) -> tuple[bool, str, Card | None]:
+        """패(Hand)에서 카드를 1장 버립니다. (코스트 소모 없음)
+
+        target_cost가 지정된 경우, 해당 코스트를 가진 카드를 우선적으로 찾아 버립니다.
+        반환값: (성공여부, 메시지/사유, 버려진 Card 객체)
+        """
+        target_card: Card | None = None
+        for card in self.hand:
+            if card.name == card_name:
+                if target_cost is not None and card.cost != target_cost:
+                    continue
+                target_card = card
+                break
+
+        if not target_card:
+            if target_cost is not None:
+                return False, f"패에 코스트 {target_cost}인 '{card_name}' 카드가 없습니다.", None
+            return False, f"패에 '{card_name}' 카드가 없습니다.", None
+
+        self.hand.remove(target_card)
+        return True, "버리기 성공", target_card
+
+    def discard_card_at(self, hand_index: int) -> tuple[bool, str, Card | None]:
+        """패 위치를 지정해 카드를 1장 버립니다. (코스트 소모 없음)"""
+        if hand_index < 0 or hand_index >= len(self.hand):
+            return False, "선택한 카드가 패에 없습니다.", None
+
+        target_card = self.hand.pop(hand_index)
+        return True, "버리기 성공", target_card
 
     def has_multiple_hand_variants(self, card_name: str) -> bool:
         """패에 같은 이름이면서 구분 가능한 카드가 여러 장 있는지 확인합니다."""

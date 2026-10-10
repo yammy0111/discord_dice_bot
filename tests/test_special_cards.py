@@ -22,6 +22,10 @@ class TestSpecialCards(unittest.TestCase):
         expected = '[푸리오소]\n(4)\n"모든 적에게 9회 공격"'
         self.assertEqual(disp, expected)
 
+        # Non-detail format (show_detail=False)
+        disp_compact = format_special_card_display(card, show_detail=False)
+        self.assertEqual(disp_compact, "[푸리오소] (4)")
+
     def test_use_special_card(self):
         card = self.deck.add_special_card("푸리오소", cost=4, description="강력한 공격")
         self.assertEqual(self.deck.current_cost, 5.0)
