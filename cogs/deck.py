@@ -129,6 +129,32 @@ class DeckCog(commands.Cog, name="카드 덱"):
 
         return choices[:25]
 
+    async def remaining_deck_cards_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """사용자의 현재 남은 덱에 있는 카드를 자동완성 목록으로 제공합니다."""
+        deck = deck_manager.get_deck(interaction.user.id)
+        if not deck:
+            return []
+
+        # 덱에 카드가 남아있으면 남은 덱(deck.cards), 비어있으면 원본 덱(deck.original_cards) 참조
+        cards_source = deck.cards if deck.cards else deck.original_cards
+        if not cards_source:
+            return []
+
+        choices = []
+        lowered = current.lower()
+        for index, card in enumerate(cards_source):
+            if lowered in card.name.lower() or current.strip() in str(card.cost):
+                choices.append(
+                    app_commands.Choice(
+                        name=make_choice_name(card, index),
+                        value=f"deck:{index}" if deck.cards else card.name,
+                    )
+                )
+
+        return choices[:25]
+
     async def special_cards_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
@@ -145,6 +171,27 @@ class DeckCog(commands.Cog, name="카드 덱"):
                 if len(label) > 100:
                     label = f"{label[:97]}..."
                 choices.append(app_commands.Choice(name=label, value=c.name))
+
+        return choices[:25]
+
+    async def user_decks_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """사용자가 보유한 모든 덱 목록을 자동완성으로 제공합니다."""
+        decks = deck_manager.get_all_decks(interaction.user.id)
+        if not decks:
+            return []
+
+        active_name = deck_manager.get_active_deck_name(interaction.user.id)
+        choices = []
+        lowered = current.lower()
+        for name, deck in decks.items():
+            if lowered in name.lower():
+                tag = " [사용 중]" if name == active_name else ""
+                label = f"{name}{tag} (덱 {len(deck.original_cards)}장)"
+                if len(label) > 100:
+                    label = f"{label[:97]}..."
+                choices.append(app_commands.Choice(name=label, value=name))
 
         return choices[:25]
 
@@ -180,6 +227,158 @@ class DeckCog(commands.Cog, name="카드 덱"):
                 content="[안내] 응답 시간이 초과되어 덱 생성이 취소되었습니다.",
                 view=view,
             )
+
+    @app_commands.command(name="덱목록", description="보유 중인 모든 덱 목록과 현재 사용 중인 덱을 확인합니다.")
+    @app_commands.describe(비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)")
+    async def list_decks(
+        self, interaction: discord.Interaction, 비밀: bool = False
+    ):
+        decks = deck_manager.get_all_decks(interaction.user.id)
+        if not decks:
+            await interaction.response.send_message(
+                "[안내] 생성된 덱이 없습니다. 먼저 '/덱생성' 또는 '/덱추가'로 덱을 만들어주세요.",
+                ephemeral=True,
+            )
+            return
+
+        active_name = deck_manager.get_active_deck_name(interaction.user.id)
+        lines = []
+        for name, d in decks.items():
+            is_active = (name == active_name)
+            tag = " [현재 사용 중]" if is_active else ""
+            lines.append(
+                f"- **{name}**{tag}\n"
+                f"  등록 덱: {len(d.original_cards)}/{d.MAX_DECK_SIZE}장 | "
+                f"남은 덱: {len(d.cards)}/{d.MAX_DECK_SIZE}장 | "
+                f"패: {len(d.hand)}/{d.MAX_HAND_SIZE}장 | "
+                f"코스트: {format_cost(d.current_cost)}/{d.max_cost} | "
+                f"특수 카드: {len(d.special_cards)}장"
+            )
+
+        embed = discord.Embed(
+            title=f"{interaction.user.display_name}님의 덱 목록 ({len(decks)}/{deck_manager.MAX_USER_DECKS}개)",
+            description="\n\n".join(lines),
+            color=discord.Color.teal(),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=비밀)
+
+    @app_commands.command(name="덱선택", description="사용할 덱을 선택하여 활성화합니다.")
+    @app_commands.describe(
+        덱이름="활성화할 덱의 이름 (자동완성 지원)",
+        비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
+    )
+    @app_commands.autocomplete(덱이름=user_decks_autocomplete)
+    async def select_deck(
+        self, interaction: discord.Interaction, 덱이름: str, 비밀: bool = False
+    ):
+        target_name = 덱이름.strip()
+        success, msg, deck = deck_manager.switch_deck(interaction.user.id, target_name)
+        if success and deck:
+            logger.info(f"덱 선택: {interaction.user.name} -> {target_name}")
+            await interaction.response.send_message(
+                f"{interaction.user.mention}님의 활성 덱이 '{deck.name}'(으)로 전환되었습니다.\n"
+                f"- 등록 덱: {len(deck.original_cards)}/{deck.MAX_DECK_SIZE}장 | "
+                f"남은 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장 | "
+                f"패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장 | "
+                f"코스트: {format_cost(deck.current_cost)}/{deck.max_cost}",
+                ephemeral=비밀,
+            )
+        else:
+            await interaction.response.send_message(f"[오류] {msg}", ephemeral=True)
+
+    @app_commands.command(
+        name="덱추가",
+        description=f"새로운 이름의 덱을 생성합니다. (최대 {deck_manager.MAX_USER_DECKS}개)",
+    )
+    @app_commands.describe(
+        덱이름="생성할 새로운 덱의 이름",
+        선택="생성 후 바로 이 덱을 활성화할지 여부 (기본값: True)",
+        비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
+    )
+    async def add_deck(
+        self,
+        interaction: discord.Interaction,
+        덱이름: str,
+        선택: bool = True,
+        비밀: bool = False,
+    ):
+        target_name = 덱이름.strip()
+        if not target_name:
+            await interaction.response.send_message(
+                "[오류] 생성할 덱 이름을 입력해주세요.", ephemeral=True
+            )
+            return
+
+        success, msg, deck = deck_manager.add_new_deck(
+            interaction.user.id, target_name, set_active=선택
+        )
+        if success and deck:
+            logger.info(f"덱 추가: {interaction.user.name} -> {target_name} (활성화: {선택})")
+            active_info = " (현재 활성 덱으로 전환됨)" if 선택 else ""
+            await interaction.response.send_message(
+                f"{interaction.user.mention}님의 새로운 덱 '{deck.name}'이(가) 생성되었습니다{active_info}.\n"
+                f"'/카드추가' 명령어로 카드를 등록해보세요.",
+                ephemeral=비밀,
+            )
+        else:
+            await interaction.response.send_message(f"[오류] {msg}", ephemeral=True)
+
+    @app_commands.command(name="덱삭제", description="보유 중인 특정 덱을 삭제합니다. (최소 1개 유지)")
+    @app_commands.describe(
+        덱이름="삭제할 덱의 이름 (자동완성 지원)",
+        비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
+    )
+    @app_commands.autocomplete(덱이름=user_decks_autocomplete)
+    async def delete_deck(
+        self, interaction: discord.Interaction, 덱이름: str, 비밀: bool = False
+    ):
+        target_name = 덱이름.strip()
+        success, msg, new_active = deck_manager.delete_deck(
+            interaction.user.id, target_name
+        )
+        if success:
+            logger.info(f"덱 삭제: {interaction.user.name} -> {target_name}")
+            switch_info = (
+                f"\n- 현재 활성 덱이 '{new_active}'(으)로 변경되었습니다."
+                if new_active
+                else ""
+            )
+            await interaction.response.send_message(
+                f"{interaction.user.mention}님의 '{target_name}' 덱을 삭제했습니다.{switch_info}",
+                ephemeral=비밀,
+            )
+        else:
+            await interaction.response.send_message(f"[오류] {msg}", ephemeral=True)
+
+    @app_commands.command(name="덱이름변경", description="기존 덱의 이름을 변경합니다.")
+    @app_commands.describe(
+        기존이름="이름을 변경할 덱의 기존 이름 (자동완성 지원)",
+        새이름="새로 지정할 덱의 이름",
+        비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
+    )
+    @app_commands.autocomplete(기존이름=user_decks_autocomplete)
+    async def rename_deck(
+        self,
+        interaction: discord.Interaction,
+        기존이름: str,
+        새이름: str,
+        비밀: bool = False,
+    ):
+        old_name = 기존이름.strip()
+        new_name = 새이름.strip()
+        success, msg = deck_manager.rename_deck(
+            interaction.user.id, old_name, new_name
+        )
+        if success:
+            logger.info(
+                f"덱 이름 변경: {interaction.user.name} -> {old_name} -> {new_name}"
+            )
+            await interaction.response.send_message(
+                f"{interaction.user.mention}님의 덱 이름이 '{old_name}'에서 '{new_name}'(으)로 변경되었습니다.",
+                ephemeral=비밀,
+            )
+        else:
+            await interaction.response.send_message(f"[오류] {msg}", ephemeral=True)
 
     @app_commands.command(
         name="카드추가",
@@ -462,6 +661,76 @@ class DeckCog(commands.Cog, name="카드 덱"):
             msg += f"\n(패 제한으로 인해 {len(drawn)}장만 뽑혔습니다.)"
 
         await interaction.response.send_message(msg, ephemeral=비밀)
+
+    @app_commands.command(
+        name="카드가져오기",
+        description="남은 덱에서 원하는 카드를 직접 지정하여 패로 가져옵니다.",
+    )
+    @app_commands.describe(
+        카드이름="가져올 카드의 이름 또는 목록 번호 (자동완성 지원)",
+        비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
+    )
+    @app_commands.autocomplete(카드이름=remaining_deck_cards_autocomplete)
+    async def fetch_card(
+        self, interaction: discord.Interaction, 카드이름: str, 비밀: bool = False
+    ):
+        deck = deck_manager.get_deck(interaction.user.id)
+        if not deck:
+            await interaction.response.send_message(
+                "[안내] 먼저 '/덱생성' 명령어로 덱을 생성해주세요.", ephemeral=True
+            )
+            return
+
+        if deck.is_hand_full():
+            await interaction.response.send_message(
+                f"[오류] 패가 가득 찼습니다. (최대 {deck.MAX_HAND_SIZE}장) 더 이상 카드를 패로 가져올 수 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        if not deck.cards and not deck.original_cards:
+            await interaction.response.send_message(
+                "[안내] 덱에 등록된 카드가 없습니다. 먼저 '/카드추가'로 카드를 등록해주세요.",
+                ephemeral=True,
+            )
+            return
+
+        # 자동완성 값 파싱: 'deck:인덱스' 또는 일반 '이름'
+        target_name = 카드이름.strip()
+        deck_index: int | None = None
+        target_cost: int | None = None
+        if target_name.startswith("deck:") and target_name[5:].isdigit():
+            deck_index = int(target_name[5:])
+        elif ":" in target_name:
+            parts = target_name.rsplit(":", 1)
+            if parts[1].strip().isdigit():
+                target_name = parts[0].strip()
+                target_cost = int(parts[1].strip())
+
+        if deck_index is not None and deck.cards and 0 <= deck_index < len(deck.cards):
+            success, reason, card, refilled = deck.fetch_card_from_deck_at(deck_index)
+        else:
+            success, reason, card, refilled = deck.fetch_card_from_deck(
+                target_name, target_cost=target_cost
+            )
+
+        if success and card:
+            deck_manager.save_deck(interaction.user.id)
+            logger.info(
+                f"카드 직접 가져오기: {interaction.user.name} -> '{card.name}' ({card.cost}) (초기화 여부: {refilled})"
+            )
+            card_box = format_card_display(card.name, card.cost, card.description)
+            msg = (
+                f"{interaction.user.mention}님이 덱에서 카드를 가져왔습니다:\n{card_box}\n"
+                f"- 남은 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장 | "
+                f"현재 패: {len(deck.hand)}/{deck.MAX_HAND_SIZE}장 | "
+                f"보유 코스트: {format_cost(deck.current_cost)}/{deck.max_cost}"
+            )
+            if refilled:
+                msg += "\n[안내] 덱이 고갈되어 패는 그대로 두고 덱을 초기화하여 카드를 가져왔습니다."
+            await interaction.response.send_message(msg, ephemeral=비밀)
+        else:
+            await interaction.response.send_message(f"[오류] {reason}", ephemeral=True)
 
     @app_commands.command(name="패확인", description="현재 내 손(패)에 있는 카드 목록과 코스트를 확인합니다.")
     @app_commands.describe(비밀="나에게만 패를 표시할지 여부 (기본값: False, 공개)")
@@ -991,13 +1260,6 @@ class DeckCog(commands.Cog, name="카드 덱"):
 
         await interaction.response.send_message(embed=embed, ephemeral=비밀)
 
-    @app_commands.command(name="특수카드목록", description="보유 중인 특수 카드 목록을 확인합니다. (/특수카드확인과 동일)")
-    @app_commands.describe(비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)")
-    async def list_special_cards(
-        self, interaction: discord.Interaction, 비밀: bool = False
-    ):
-        await self.check_special_cards(interaction, 비밀=비밀)
-
     @app_commands.command(name="특수카드사용", description="보유 중인 특수 카드를 1장 사용합니다. (코스트 차감)")
     @app_commands.describe(카드이름="사용할 특수 카드의 이름 (자동완성 지원)")
     @app_commands.autocomplete(카드이름=special_cards_autocomplete)
@@ -1070,17 +1332,6 @@ class DeckCog(commands.Cog, name="카드 덱"):
             f"- 남은 특수 카드: {len(deck.special_cards)}장",
             ephemeral=비밀,
         )
-
-    @app_commands.command(name="특수카드삭제", description="보유 중인 특수 카드를 1장 삭제합니다. (/특수카드제거와 동일)")
-    @app_commands.describe(
-        카드이름="삭제할 특수 카드 이름 (자동완성 지원)",
-        비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
-    )
-    @app_commands.autocomplete(카드이름=special_cards_autocomplete)
-    async def delete_special_card(
-        self, interaction: discord.Interaction, 카드이름: str, 비밀: bool = False
-    ):
-        await self.remove_special_card(interaction, 카드이름=카드이름, 비밀=비밀)
 
     @app_commands.command(name="특수카드정보설정", description="이미 등록된 특수 카드의 코스트나 설명을 수정합니다.")
     @app_commands.describe(

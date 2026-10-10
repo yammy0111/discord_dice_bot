@@ -168,8 +168,9 @@ class Deck:
     MAX_DECK_SIZE: int = 9
     MAX_HAND_SIZE: int = 9
 
-    def __init__(self, owner_id: int):
+    def __init__(self, owner_id: int, name: str = "기본"):
         self.owner_id = owner_id
+        self.name = name.strip() if name and name.strip() else "기본"
         self.original_cards: list[Card] = []  # 등록된 원본 덱 카드 목록
         self.cards: list[Card] = []           # 현재 덱에 남아있는 카드 목록
         self.hand: list[Card] = []            # 현재 손에 든 패
@@ -180,9 +181,22 @@ class Deck:
         self.bonus_max_cost: int = 0          # 전투 중 최대 코스트 보정값
         self.current_cost: float = 3.0        # 현재 코스트 보유량 (음이 아닌 유리수)
 
+    def clone_deck(self, new_name: str) -> Deck:
+        """현재 덱을 복제하여 새로운 이름의 덱 인스턴스를 생성합니다."""
+        d = Deck(owner_id=self.owner_id, name=new_name)
+        d.original_cards = [c.clone() for c in self.original_cards]
+        d.cards = [c.clone() for c in self.cards]
+        d.hand = [c.clone() for c in self.hand]
+        d.special_cards = [c.clone() for c in self.special_cards]
+        d.base_max_cost = self.base_max_cost
+        d.bonus_max_cost = self.bonus_max_cost
+        d.current_cost = self.current_cost
+        return d
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "owner_id": self.owner_id,
+            "name": self.name,
             "original_cards": [card.to_dict() for card in self.original_cards],
             "cards": [card.to_dict() for card in self.cards],
             "hand": [card.to_dict() for card in self.hand],
@@ -194,7 +208,10 @@ class Deck:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Deck:
-        deck = cls(owner_id=int(data["owner_id"]))
+        deck = cls(
+            owner_id=int(data["owner_id"]),
+            name=str(data.get("name", "기본")),
+        )
         deck.original_cards = [
             Card.from_dict(card)
             for card in data.get("original_cards", [])
@@ -452,6 +469,73 @@ class Deck:
             drawn_cards.append(card)
 
         return drawn_cards, refilled
+
+    def fetch_card_from_deck(
+        self, card_name: str, target_cost: int | None = None
+    ) -> tuple[bool, str, Card | None, bool]:
+        """남은 덱에서 특정 카드를 직접 패로 가져옵니다.
+
+        덱이 고갈된 상태이면 패는 그대로 두고 덱을 리필한 후 검색합니다.
+        반환값: (성공여부, 메시지/사유, 가져온 Card 객체, 리필 발생 여부)
+        """
+        if self.is_hand_full():
+            return False, f"패가 가득 찼습니다. (최대 {self.MAX_HAND_SIZE}장)", None, False
+
+        refilled = False
+        if not self.cards:
+            if not self.original_cards:
+                return False, "덱에 등록된 카드가 없습니다.", None, False
+            self.refill_deck()
+            refilled = True
+
+        target_card: Card | None = None
+        target_idx: int = -1
+        for idx, card in enumerate(self.cards):
+            if card.name == card_name:
+                if target_cost is not None and card.cost != target_cost:
+                    continue
+                target_card = card
+                target_idx = idx
+                break
+
+        if target_card is None or target_idx == -1:
+            in_orig = any(c.name == card_name for c in self.original_cards)
+            if in_orig:
+                return (
+                    False,
+                    f"현재 남은 덱에 '{card_name}' 카드가 없습니다. (이미 패에 있거나 소모되었습니다.)",
+                    None,
+                    refilled,
+                )
+            return False, f"덱에 '{card_name}' 카드가 등록되어 있지 않습니다.", None, refilled
+
+        fetched = self.cards.pop(target_idx)
+        self.hand.append(fetched)
+        return True, "가져오기 성공", fetched, refilled
+
+    def fetch_card_from_deck_at(
+        self, deck_index: int
+    ) -> tuple[bool, str, Card | None, bool]:
+        """남은 덱의 특정 인덱스 위치 카드를 직접 패로 가져옵니다.
+
+        반환값: (성공여부, 메시지/사유, 가져온 Card 객체, 리필 발생 여부)
+        """
+        if self.is_hand_full():
+            return False, f"패가 가득 찼습니다. (최대 {self.MAX_HAND_SIZE}장)", None, False
+
+        refilled = False
+        if not self.cards:
+            if not self.original_cards:
+                return False, "덱에 등록된 카드가 없습니다.", None, False
+            self.refill_deck()
+            refilled = True
+
+        if deck_index < 0 or deck_index >= len(self.cards):
+            return False, "지정한 위치의 카드가 남은 덱에 없습니다.", None, refilled
+
+        fetched = self.cards.pop(deck_index)
+        self.hand.append(fetched)
+        return True, "가져오기 성공", fetched, refilled
 
     def use_card(
         self, card_name: str, target_cost: int | None = None
