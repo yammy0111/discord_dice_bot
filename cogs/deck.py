@@ -607,16 +607,27 @@ class DeckCog(commands.Cog, name="카드 덱"):
     @app_commands.command(name="카드뽑기", description="덱에서 카드를 뽑아 패로 가져옵니다. (패 최대 9장)")
     @app_commands.describe(
         장수="뽑을 카드의 장수 (기본값: 1)",
+        대상="카드를 뽑을 대상 유저 (기본값: 본인)",
         비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
     )
     async def draw_card(
-        self, interaction: discord.Interaction, 장수: int = 1, 비밀: bool = False
+        self,
+        interaction: discord.Interaction,
+        장수: int = 1,
+        대상: discord.User | None = None,
+        비밀: bool = False,
     ):
-        deck = deck_manager.get_deck(interaction.user.id)
+        target_user = 대상 if 대상 is not None else interaction.user
+        deck = deck_manager.get_deck(target_user.id)
         if not deck:
-            await interaction.response.send_message(
-                "[안내] 먼저 '/덱생성' 명령어로 덱을 생성해주세요.", ephemeral=True
-            )
+            if target_user.id == interaction.user.id:
+                await interaction.response.send_message(
+                    "[안내] 먼저 '/덱생성' 명령어로 덱을 생성해주세요.", ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    f"[안내] {target_user.mention}님의 생성된 덱이 없습니다.", ephemeral=True
+                )
             return
 
         if 장수 <= 0:
@@ -627,26 +638,32 @@ class DeckCog(commands.Cog, name="카드 덱"):
 
         if deck.is_hand_full():
             await interaction.response.send_message(
-                f"[오류] 패가 가득 찼습니다. (최대 {deck.MAX_HAND_SIZE}장) 더 이상 카드를 뽑을 수 없습니다.",
+                f"[오류] {target_user.mention}님의 패가 가득 찼습니다. (최대 {deck.MAX_HAND_SIZE}장) 더 이상 카드를 뽑을 수 없습니다.",
                 ephemeral=True,
             )
             return
 
         if not deck.cards and not deck.original_cards:
             await interaction.response.send_message(
-                "[안내] 덱에 등록된 카드가 없습니다. 먼저 '/카드추가'로 카드를 등록해주세요.",
+                f"[안내] {target_user.mention}님의 덱에 등록된 카드가 없습니다. 먼저 '/카드추가'로 카드를 등록해주세요.",
                 ephemeral=True,
             )
             return
 
         drawn, refilled = deck.draw_card(장수)
-        deck_manager.save_deck(interaction.user.id)
+        deck_manager.save_deck(target_user.id)
         drawn_str = "\n\n".join(
             format_card_display(c.name, c.cost, c.description) for c in drawn
         )
-        logger.info(f"카드 드로우: {interaction.user.name} -> {len(drawn)}장 (초기화 여부: {refilled})")
+        logger.info(
+            f"카드 드로우: {interaction.user.name} -> {target_user.name}에게 {len(drawn)}장 (초기화 여부: {refilled})"
+        )
 
-        msg = f"{interaction.user.mention}님이 카드를 {len(drawn)}장 뽑았습니다.\n"
+        if target_user.id == interaction.user.id:
+            msg = f"{interaction.user.mention}님이 카드를 {len(drawn)}장 뽑았습니다.\n"
+        else:
+            msg = f"{interaction.user.mention}님이 {target_user.mention}님의 카드를 {len(drawn)}장 뽑았습니다.\n"
+
         msg += f"- 뽑은 카드:\n{drawn_str}\n"
         msg += (
             f"- 남은 덱: {len(deck.cards)}/{deck.MAX_DECK_SIZE}장 | "
@@ -1296,20 +1313,30 @@ class DeckCog(commands.Cog, name="카드 덱"):
     @app_commands.command(name="코스트변경", description="현재 코스트를 변경합니다. 양수는 회복, 음수는 감소입니다.")
     @app_commands.describe(
         수치="변경할 코스트 수치 (양수면 회복, 음수면 감소 / 소수 가능, 기본값: 1.0)",
+        대상="코스트를 변경할 대상 유저 (기본값: 본인)",
         비밀="나에게만 결과를 표시할지 여부 (기본값: False, 공개)",
     )
     async def restore_cost(
-        self, interaction: discord.Interaction, 수치: float = 1.0, 비밀: bool = False
+        self,
+        interaction: discord.Interaction,
+        수치: float = 1.0,
+        대상: discord.User | None = None,
+        비밀: bool = False,
     ):
-        deck = deck_manager.get_or_create_deck(interaction.user.id)
+        target_user = 대상 if 대상 is not None else interaction.user
+        deck = deck_manager.get_or_create_deck(target_user.id)
         changed = deck.restore_cost(수치)
-        deck_manager.save_deck(interaction.user.id)
+        deck_manager.save_deck(target_user.id)
         result_text = describe_delta(changed, "회복되었습니다", "감소했습니다")
-        logger.info(f"코스트 증감: {interaction.user.name} -> {수치} (실제 {changed})")
-        await interaction.response.send_message(
-            f"{interaction.user.mention}님의 코스트가 {result_text}. (현재 코스트: {format_cost(deck.current_cost)}/{deck.max_cost})",
-            ephemeral=비밀,
+        logger.info(
+            f"코스트 증감: {interaction.user.name} -> {target_user.name} ({수치}, 실제 {changed})"
         )
+        if target_user.id == interaction.user.id:
+            msg = f"{interaction.user.mention}님의 코스트가 {result_text}. (현재 코스트: {format_cost(deck.current_cost)}/{deck.max_cost})"
+        else:
+            msg = f"{interaction.user.mention}님이 {target_user.mention}님의 코스트를 변경하여 {result_text}. (현재 코스트: {format_cost(deck.current_cost)}/{deck.max_cost})"
+
+        await interaction.response.send_message(msg, ephemeral=비밀)
 
     @app_commands.command(name="최대코스트변경", description="이번 전투 동안 최대 코스트를 변경합니다. 양수는 증가, 음수는 감소입니다.")
     @app_commands.describe(수치="이번 전투 동안 변경할 최대 코스트 (양수면 증가, 음수면 감소)")
