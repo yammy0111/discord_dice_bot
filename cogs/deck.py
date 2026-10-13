@@ -780,6 +780,259 @@ class DeckCog(commands.Cog, name="카드 덱"):
 
         await interaction.response.send_message(embed=embed, ephemeral=비밀)
 
+    # --- 팀 및 아군 연동 슬래시 명령어 ---
+
+    @app_commands.command(name="팀설정", description="서버 내에서 내가 소속될 팀을 설정합니다.")
+    @app_commands.describe(
+        팀이름="소속될 팀의 이름 (예: 레드팀, 블루팀, A팀 등)"
+    )
+    async def set_team(self, interaction: discord.Interaction, 팀이름: str):
+        if not interaction.guild_id:
+            await interaction.response.send_message(
+                "[오류] 팀 기능은 서버 내에서만 사용할 수 있습니다.", ephemeral=True
+            )
+            return
+
+        clean_team = 팀이름.strip()
+        if not clean_team:
+            await interaction.response.send_message(
+                "[오류] 팀 이름을 입력해주세요.", ephemeral=True
+            )
+            return
+
+        deck_manager.set_user_team(interaction.guild_id, interaction.user.id, clean_team)
+        logger.info(f"팀 설정: {interaction.user.name} -> {clean_team}")
+        await interaction.response.send_message(
+            f"{interaction.user.mention}님의 소속 팀이 '{clean_team}'(으)로 설정되었습니다.",
+            ephemeral=False,
+        )
+
+    @app_commands.command(name="팀탈퇴", description="현재 소속된 팀에서 탈퇴합니다.")
+    async def leave_team(self, interaction: discord.Interaction):
+        if not interaction.guild_id:
+            await interaction.response.send_message(
+                "[오류] 팀 기능은 서버 내에서만 사용할 수 있습니다.", ephemeral=True
+            )
+            return
+
+        current_team = deck_manager.get_user_team(interaction.guild_id, interaction.user.id)
+        if not current_team:
+            await interaction.response.send_message(
+                "[안내] 현재 소속된 팀이 없습니다.", ephemeral=True
+            )
+            return
+
+        deck_manager.leave_user_team(interaction.guild_id, interaction.user.id)
+        logger.info(f"팀 탈퇴: {interaction.user.name} -> {current_team}")
+        await interaction.response.send_message(
+            f"{interaction.user.mention}님이 '{current_team}' 팀에서 탈퇴했습니다.",
+            ephemeral=False,
+        )
+
+    @app_commands.command(
+        name="아군패확인",
+        description="같은 팀 아군의 패와 코스트를 확인합니다. (비밀로 확인 가능)",
+    )
+    @app_commands.describe(
+        아군="패와 코스트를 확인할 같은 팀 유저",
+        상세="카드의 상세 설명(효과)을 함께 표시할지 여부 (기본값: False, 비표시)",
+        비밀="나에게만 결과를 표시할지 여부 (기본값: True, 비밀)",
+    )
+    async def check_ally_hand(
+        self,
+        interaction: discord.Interaction,
+        아군: discord.User,
+        상세: bool = False,
+        비밀: bool = True,
+    ):
+        if not interaction.guild_id:
+            await interaction.response.send_message(
+                "[오류] 팀 기능은 서버 내에서만 사용할 수 있습니다.", ephemeral=True
+            )
+            return
+
+        if 아군.id == interaction.user.id:
+            # 본인 패 확인 호출과 동일하게 처리
+            await self.check_hand(interaction, 상세=상세, 비밀=비밀)
+            return
+
+        my_team = deck_manager.get_user_team(interaction.guild_id, interaction.user.id)
+        ally_team = deck_manager.get_user_team(interaction.guild_id, 아군.id)
+
+        if not my_team:
+            await interaction.response.send_message(
+                "[오류] 먼저 '/팀설정'으로 팀을 지정해야 아군의 패를 확인할 수 있습니다.",
+                ephemeral=True,
+            )
+            return
+
+        if not ally_team or my_team != ally_team:
+            await interaction.response.send_message(
+                f"[오류] {아군.mention}님은 같은 팀('{my_team}')이 아닙니다.",
+                ephemeral=True,
+            )
+            return
+
+        ally_deck = deck_manager.get_deck(아군.id)
+        if not ally_deck:
+            await interaction.response.send_message(
+                f"[안내] 아군 {아군.mention}님의 생성된 덱이 없습니다.", ephemeral=True
+            )
+            return
+
+        hand_cards = ally_deck.current_hand()
+        if not hand_cards:
+            hand_display = "(패가 비어 있습니다.)"
+        else:
+            blocks = []
+            for i, card in enumerate(hand_cards):
+                card_str = format_card_display(
+                    card.name, card.cost, card.description, show_detail=상세
+                )
+                blocks.append(f"{i + 1}. {card_str}")
+            sep = "\n\n" if 상세 else "\n"
+            hand_display = sep.join(blocks)
+
+        proxy_status = (
+            "허용됨" if deck_manager.is_proxy_play_enabled(interaction.guild_id, 아군.id) else "비활성화"
+        )
+
+        embed = discord.Embed(
+            title=f"아군 {아군.display_name}님의 패 정보 ({len(hand_cards)}/{ally_deck.MAX_HAND_SIZE}장)",
+            description=f"소속 팀: **{my_team}** | 대신 플레이: **{proxy_status}**",
+            color=discord.Color.teal(),
+        )
+        embed.add_field(
+            name="보유 코스트",
+            value=f"{format_cost(ally_deck.current_cost)} / {ally_deck.max_cost}",
+            inline=False,
+        )
+        embed.add_field(
+            name="패 목록",
+            value=hand_display,
+            inline=False,
+        )
+
+        await interaction.response.send_message(embed=embed, ephemeral=비밀)
+
+    @app_commands.command(
+        name="대신플레이설정",
+        description="같은 팀 아군이 내 패의 카드를 대신 사용할 수 있도록 허용할지 설정합니다. (기본: 비활성화)",
+    )
+    @app_commands.describe(
+        허용="대신 플레이 허용 여부 (True: 허용, False: 비활성화)"
+    )
+    async def set_proxy_play(self, interaction: discord.Interaction, 허용: bool):
+        if not interaction.guild_id:
+            await interaction.response.send_message(
+                "[오류] 팀 기능은 서버 내에서만 사용할 수 있습니다.", ephemeral=True
+            )
+            return
+
+        deck_manager.set_proxy_play(interaction.guild_id, interaction.user.id, 허용)
+        logger.info(f"대신 플레이 설정: {interaction.user.name} -> {허용}")
+        status_text = "활성화(허용)" if 허용 else "비활성화"
+        await interaction.response.send_message(
+            f"{interaction.user.mention}님의 대신 플레이 기능이 **{status_text}**되었습니다.\n"
+            + ("이제 같은 팀 아군이 '/대신카드사용'으로 내 카드를 대신 사용할 수 있습니다." if 허용 else "아군이 내 카드를 대신 사용할 수 없습니다."),
+            ephemeral=False,
+        )
+
+    @app_commands.command(
+        name="대신카드사용",
+        description="대신 플레이가 켜진 같은 팀 아군의 패에서 카드를 1장 대신 사용합니다.",
+    )
+    @app_commands.describe(
+        아군="카드를 대신 사용할 아군 유저",
+        카드이름="사용할 아군 카드의 이름 또는 패 번호 (예: 1 또는 카드이름)"
+    )
+    async def use_ally_card(
+        self,
+        interaction: discord.Interaction,
+        아군: discord.User,
+        카드이름: str,
+    ):
+        if not interaction.guild_id:
+            await interaction.response.send_message(
+                "[오류] 팀 기능은 서버 내에서만 사용할 수 있습니다.", ephemeral=True
+            )
+            return
+
+        if 아군.id == interaction.user.id:
+            await interaction.response.send_message(
+                "[안내] 본인의 카드는 '/카드사용' 명령어를 이용해주세요.", ephemeral=True
+            )
+            return
+
+        my_team = deck_manager.get_user_team(interaction.guild_id, interaction.user.id)
+        ally_team = deck_manager.get_user_team(interaction.guild_id, 아군.id)
+
+        if not my_team or my_team != ally_team:
+            await interaction.response.send_message(
+                f"[오류] {아군.mention}님은 같은 팀이 아닙니다.", ephemeral=True
+            )
+            return
+
+        if not deck_manager.is_proxy_play_enabled(interaction.guild_id, 아군.id):
+            await interaction.response.send_message(
+                f"[오류] {아군.mention}님이 대신 플레이 기능을 켜지 않았습니다. (아군이 먼저 '/대신플레이설정 허용:True'를 해야 합니다.)",
+                ephemeral=True,
+            )
+            return
+
+        ally_deck = deck_manager.get_deck(아군.id)
+        if not ally_deck:
+            await interaction.response.send_message(
+                f"[오류] {아군.mention}님의 덱이 없습니다.", ephemeral=True
+            )
+            return
+
+        # 패 번호(1-based) 입력 지원
+        target_input = 카드이름.strip()
+        hand_index: int | None = None
+        target_name = target_input
+        target_cost: int | None = None
+
+        if target_input.isdigit():
+            idx = int(target_input) - 1
+            if 0 <= idx < len(ally_deck.hand):
+                hand_index = idx
+        elif target_input.startswith("hand:") and target_input[5:].isdigit():
+            hand_index = int(target_input[5:])
+        elif ":" in target_input:
+            parts = target_input.rsplit(":", 1)
+            if parts[1].strip().isdigit():
+                target_name = parts[0].strip()
+                target_cost = int(parts[1].strip())
+
+        if hand_index is not None:
+            success, reason, card = ally_deck.use_card_at(hand_index)
+        else:
+            success, reason, card = ally_deck.use_card(target_name, target_cost=target_cost)
+
+        if success and card:
+            deck_manager.save_deck(아군.id)
+            logger.info(
+                f"대신 카드 사용: {interaction.user.name} -> {아군.name}의 '{card.name}' ({card.cost})"
+            )
+            card_box = format_card_display(card.name, card.cost, card.description)
+            await interaction.response.send_message(
+                f"{interaction.user.mention}님이 아군 {아군.mention}님의 패에서 카드를 대신 사용했습니다:\n{card_box}\n"
+                f"- 아군 잔여 코스트: {format_cost(ally_deck.current_cost)}/{ally_deck.max_cost} | 남은 패: {len(ally_deck.hand)}/{ally_deck.MAX_HAND_SIZE}장",
+                ephemeral=False,
+            )
+        else:
+            if reason == "코스트가 부족합니다." and card:
+                await interaction.response.send_message(
+                    f"[오류] 아군의 코스트가 부족합니다. (필요: {card.cost}, 보유: {format_cost(ally_deck.current_cost)}/{ally_deck.max_cost})",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    f"[오류] {아군.mention}님의 패에 '{target_input}' 카드가 없습니다. '/아군패확인'으로 아군의 현재 패를 확인해보세요.",
+                    ephemeral=True,
+                )
+
     @app_commands.command(name="카드사용", description="패에서 카드를 1장 사용합니다. (코스트 자동 차감)")
     @app_commands.describe(카드이름="사용할 카드의 이름 (자동완성 지원, 코스트별 개별 선택 가능)")
     @app_commands.autocomplete(카드이름=hand_card_autocomplete)

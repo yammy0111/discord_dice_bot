@@ -21,6 +21,8 @@ class DeckManager:
         self.db_path = db_path
         self._user_decks: dict[int, dict[str, Deck]] = {}  # user_id -> {deck_name: Deck}
         self._active_deck: dict[int, str] = {}             # user_id -> active_deck_name
+        self._user_team: dict[tuple[int, int], str] = {}   # (guild_id, user_id) -> team_name
+        self._proxy_play: dict[tuple[int, int], bool] = {} # (guild_id, user_id) -> bool
         self._init_db()
         self._load_all()
 
@@ -40,12 +42,27 @@ class DeckManager:
                     )
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS guild_teams (
+                        guild_id INTEGER NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        team_name TEXT NOT NULL,
+                        proxy_play INTEGER NOT NULL DEFAULT 0,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (guild_id, user_id)
+                    )
+                    """
+                )
 
     def _load_all(self) -> None:
         with closing(self._connect()) as conn:
-            rows = conn.execute("SELECT user_id, payload FROM player_decks").fetchall()
+            deck_rows = conn.execute("SELECT user_id, payload FROM player_decks").fetchall()
+            team_rows = conn.execute(
+                "SELECT guild_id, user_id, team_name, proxy_play FROM guild_teams"
+            ).fetchall()
 
-        for user_id, payload in rows:
+        for user_id, payload in deck_rows:
             try:
                 data = json.loads(payload)
                 uid = int(user_id)
@@ -71,6 +88,11 @@ class DeckManager:
                     self._active_deck[uid] = d_name
             except (TypeError, ValueError, json.JSONDecodeError, KeyError):
                 continue
+
+        for guild_id, user_id, team_name, proxy_play in team_rows:
+            key = (int(guild_id), int(user_id))
+            self._user_team[key] = str(team_name)
+            self._proxy_play[key] = bool(proxy_play)
 
     def save_deck(self, user_id: int) -> None:
         decks_map = self._user_decks.get(user_id)
@@ -240,6 +262,85 @@ class DeckManager:
                     conn.execute("DELETE FROM player_decks WHERE user_id = ?", (user_id,))
             return True
         return False
+
+    # --- 팀 및 대리 플레이 관리 메서드 ---
+
+    def set_user_team(self, guild_id: int, user_id: int, team_name: str) -> None:
+        """유저의 팀을 설정합니다."""
+        clean_team = team_name.strip()
+        key = (guild_id, user_id)
+        self._user_team[key] = clean_team
+        proxy = self._proxy_play.get(key, False)
+        with closing(self._connect()) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO guild_teams (guild_id, user_id, team_name, proxy_play, updated_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                        team_name = excluded.team_name,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (guild_id, user_id, clean_team, int(proxy)),
+                )
+
+    def leave_user_team(self, guild_id: int, user_id: int) -> bool:
+        """유저의 팀 설정을 제거(팀 탈퇴)합니다."""
+        key = (guild_id, user_id)
+        if key in self._user_team:
+            del self._user_team[key]
+            self._proxy_play.pop(key, None)
+            with closing(self._connect()) as conn:
+                with conn:
+                    conn.execute(
+                        "DELETE FROM guild_teams WHERE guild_id = ? AND user_id = ?",
+                        (guild_id, user_id),
+                    )
+            return True
+        return False
+
+    def get_user_team(self, guild_id: int, user_id: int) -> str | None:
+        """유저가 속한 팀 이름을 반환합니다."""
+        return self._user_team.get((guild_id, user_id))
+
+    def are_teammates(self, guild_id: int, user1_id: int, user2_id: int) -> bool:
+        """두 유저가 같은 팀인지 확인합니다."""
+        team1 = self.get_user_team(guild_id, user1_id)
+        team2 = self.get_user_team(guild_id, user2_id)
+        if not team1 or not team2:
+            return False
+        return team1 == team2
+
+    def get_team_members(self, guild_id: int, team_name: str) -> list[int]:
+        """해당 팀에 속한 유저 ID 목록을 반환합니다."""
+        clean_team = team_name.strip()
+        members = []
+        for (g_id, u_id), t_name in self._user_team.items():
+            if g_id == guild_id and t_name == clean_team:
+                members.append(u_id)
+        return members
+
+    def set_proxy_play(self, guild_id: int, user_id: int, enabled: bool) -> None:
+        """대신 플레이(대리 플레이) 허용 여부를 설정합니다."""
+        key = (guild_id, user_id)
+        self._proxy_play[key] = bool(enabled)
+        team_name = self._user_team.get(key, "")
+        with closing(self._connect()) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO guild_teams (guild_id, user_id, team_name, proxy_play, updated_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                        proxy_play = excluded.proxy_play,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (guild_id, user_id, team_name, int(enabled)),
+                )
+
+    def is_proxy_play_enabled(self, guild_id: int, user_id: int) -> bool:
+        """유저의 대신 플레이(대리 플레이) 허용 여부를 확인합니다."""
+        return self._proxy_play.get((guild_id, user_id), False)
 
 
 # 전역 싱글톤 매니저 인스턴스
