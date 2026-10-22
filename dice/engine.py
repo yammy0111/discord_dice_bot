@@ -25,6 +25,7 @@ class DiceEngine:
     def roll(
         self,
         expression: str,
+        bias: str | None = None,
     ) -> EngineResult:
 
         expression = expression.strip()
@@ -41,7 +42,7 @@ class DiceEngine:
         ast_tree = parser.parse()
 
         # 3. Evaluate
-        evaluator = Evaluator()
+        evaluator = Evaluator(bias=bias)
         (
             value,
             substituted_expression,
@@ -67,6 +68,7 @@ class DiceEngine:
     def roll_multiple(
         self,
         raw_expression: str,
+        bias: str | None = None,
     ) -> list[EngineResult]:
         """
         쉼표(,)로 구분된 여러 주사위 표현식을 순차적으로 평가
@@ -83,13 +85,14 @@ class DiceEngine:
 
         results = []
         for part in parts:
-            results.append(self.roll(part))
+            results.append(self.roll(part, bias=bias))
 
         return results
 
     def roll_derived(
         self,
         raw_expression: str,
+        bias: str | None = None,
     ) -> DerivedRollResult:
         """
         '>' 구문으로 기본 주사위 굴림과 단계별 파생 계산식을 처리
@@ -112,7 +115,7 @@ class DiceEngine:
         if not derived_sections or any(not section for section in derived_sections):
             raise DiceError("파생 계산식이 비어있습니다.")
 
-        base_result = self.roll(base_expr)
+        base_result = self.roll(base_expr, bias=bias)
         current_values: list[tuple[int | float, str]] = [
             (base_result.value, "기본")
         ]
@@ -145,7 +148,7 @@ class DiceEngine:
                         full_expr = f"{src_str}{formula}"
 
                     try:
-                        result = self.roll(full_expr)
+                        result = self.roll(full_expr, bias=bias)
                     except DiceError as e:
                         raise DiceError(
                             f"{level}차 파생 계산식 '{formula}' 오류: {e}"
@@ -176,4 +179,4 @@ class DiceEngine:
         return DerivedRollResult(
             base=base_result,
             derived=derived_results,
-        )
+        )

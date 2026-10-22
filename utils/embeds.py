@@ -13,13 +13,15 @@ def build_derived_dice_embed(
     result: DerivedRollResult,
     user: discord.User | discord.Member,
     show_detail: bool = False,
+    title: str = "다중 파생 굴림 결과",
 ) -> discord.Embed:
     """기본 굴림 하나에서 여러 단계의 파생 계산을 만든 결과 Embed 생성"""
     max_field_length = 1000
     embed = discord.Embed(
-        title="다중 파생 굴림 결과",
+        title=title,
         color=discord.Color.blurple(),
     )
+
 
     base = result.base
     embed.add_field(
@@ -97,6 +99,8 @@ def build_dice_embed(
     results: Union[EngineResult, List[EngineResult]],
     user: discord.User | discord.Member,
     show_detail: bool = False,
+    title: str | None = None,
+    extra_field: tuple[str, str] | None = None,
 ) -> discord.Embed:
     """주사위 굴림 성공 결과를 시각화하는 Discord Embed 생성 (show_detail 옵션으로 상세 정보 표시 제어)"""
     if not isinstance(results, list):
@@ -104,10 +108,13 @@ def build_dice_embed(
     else:
         results_list = results
 
+    default_title = "주사위 굴림 결과" if len(results_list) == 1 else f"주사위 굴림 결과 (총 {len(results_list)}개)"
+    embed_title = title or default_title
+
     if len(results_list) == 1:
         res = results_list[0]
         embed = discord.Embed(
-            title="주사위 굴림 결과",
+            title=embed_title,
             color=discord.Color.blurple(),
         )
 
@@ -117,11 +124,19 @@ def build_dice_embed(
             inline=False,
         )
 
+        if extra_field:
+            embed.add_field(
+                name=extra_field[0],
+                value=extra_field[1],
+                inline=False,
+            )
+
         embed.add_field(
             name="요청 수식",
             value=f"`{res.expression}`",
             inline=False,
         )
+
         if res.roll_logs:
             log_lines = []
             for entry in res.roll_logs:
@@ -162,9 +177,10 @@ def build_dice_embed(
 
     else:
         embed = discord.Embed(
-            title=f"주사위 굴림 결과 (총 {len(results_list)}개)",
+            title=embed_title,
             color=discord.Color.blurple(),
         )
+
 
         for idx, res in enumerate(results_list, 1):
             detail_parts = []
@@ -214,3 +230,57 @@ def build_error_embed(
             inline=False,
         )
     return embed
+
+
+def build_mackerel_dice_embed(
+    result,
+    user: discord.User | discord.Member,
+    show_detail: bool = False,
+) -> discord.Embed:
+    """간고등어 주사위 결과 Embed 생성"""
+    embed = discord.Embed(
+        title="간고등어 주사위 굴림 결과",
+        color=discord.Color.blurple(),
+    )
+
+    embed.add_field(
+        name="최종 결과",
+        value=f"**[{result.result}]**",
+        inline=False,
+    )
+
+    embed.add_field(
+        name="설정",
+        value=f"면 수: `1d{result.sides}` | 보정 방향: `{result.bias}`",
+        inline=False,
+    )
+
+    embed.add_field(
+        name="등장 확률",
+        value=f"`{result.prob_percent:.2f}%`",
+        inline=False,
+    )
+
+    if show_detail:
+        lines = []
+        for x, w in enumerate(result.weights, start=1):
+            pct = w * 100.0
+            marker = " -> [선택됨]" if x == result.result else ""
+            lines.append(f"{x:2d}: {pct:5.2f}%{marker}")
+
+        probs_text = "\n".join(lines)
+        if len(probs_text) > 1000:
+            probs_text = probs_text[:997] + "..."
+
+        embed.add_field(
+            name="눈금별 확률 곡선 상세",
+            value=f"```\n{probs_text}\n```",
+            inline=False,
+        )
+
+    embed.set_footer(
+        text=f"요청자: {user.display_name}",
+        icon_url=user.display_avatar.url if user.display_avatar else None,
+    )
+    return embed
+

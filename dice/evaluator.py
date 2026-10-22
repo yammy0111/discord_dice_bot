@@ -73,11 +73,13 @@ from .models import (
     EvalResult,
     EvaluationContext,
 )
+from .mackerel import calculate_mackerel_probabilities
 
 
 class Evaluator:
 
-    def __init__(self):
+    def __init__(self, bias: str | None = None):
+        self.bias = bias
         self.context = EvaluationContext([])
 
     # -----------------
@@ -190,12 +192,18 @@ class Evaluator:
                 f"총 주사위 굴림 수 제한 ({MAX_TOTAL_ROLLS}개 초과)"
             )
 
-        rolls = [
-            random.randint(1, sides)
-            for _ in range(count)
-        ]
+        if self.bias in ("높은 수", "낮은 수"):
+            weights = calculate_mackerel_probabilities(sides, self.bias)  # type: ignore[arg-type]
+            outcomes = list(range(1, sides + 1))
+            rolls = random.choices(outcomes, weights=weights, k=count)
+        else:
+            rolls = [
+                random.randint(1, sides)
+                for _ in range(count)
+            ]
 
         total = sum(rolls)
+
 
         self.context.roll_entries.append(
             RollEntry(
