@@ -13,3 +13,5 @@ data/
 # 가상환경
 venv/
 .venv/
+env
+.vs

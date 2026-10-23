@@ -19,8 +19,10 @@ class TokenType(Enum):
     PERCENT = auto()  # %
 
     POW = auto()
+    CARET = auto()  # ^ (반복 연산자)
 
     LPAREN = auto()
+
     RPAREN = auto()
 
     EOF = auto()
@@ -138,7 +140,12 @@ class Tokenizer:
             self.advance()
             return Token(TokenType.PERCENT, "%", start)
 
+        if ch == "^":
+            self.advance()
+            return Token(TokenType.CARET, "^", start)
+
         if ch == "(":
+
             self.advance()
             return Token(TokenType.LPAREN, "(", start)
 

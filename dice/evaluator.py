@@ -13,6 +13,7 @@ from .nodes import (
     UnaryOpNode,
     BinaryOpNode,
     PercentNode,
+    RepeatNode,
 )
 
 from .limits import (
@@ -20,8 +21,10 @@ from .limits import (
     MAX_DICE_SIDES,
     MAX_TOTAL_ROLLS,
     MAX_POWER,
+    MAX_REPEAT_COUNT,
     MAX_RESULT_ABS,
 )
+
 
 from .errors import (
     EvaluatorError,
@@ -138,11 +141,52 @@ class Evaluator:
         if isinstance(node, PercentNode):
             return self._eval_percent(node)
 
+        if isinstance(node, RepeatNode):
+            return self._eval_repeat(node)
+
         raise EvaluatorError(
             f"지원하지 않는 노드 타입: {type(node).__name__}"
         )
 
+    def _eval_repeat(
+        self,
+        node: RepeatNode,
+    ) -> EvalResult:
+        if node.count <= 0:
+            raise EvaluatorError("반복 횟수는 1 이상이어야 합니다.")
+        if node.count > MAX_REPEAT_COUNT:
+            raise LimitExceededError(
+                f"반복 횟수 제한 ({MAX_REPEAT_COUNT}회 초과)"
+            )
+
+        rendered_list: list[str] = []
+        total_val: int | float = 0
+
+        for _ in range(node.count):
+            res = self._eval(node.operand)
+            total_val += res.value
+            rendered_list.append(res.rendered)
+
+        if isinstance(total_val, float):
+            total_val = round(total_val, 2)
+            if total_val.is_integer():
+                total_val = int(total_val)
+
+        if node.count == 1:
+            rendered = rendered_list[0]
+            op_type = None
+        else:
+            rendered = "+".join(rendered_list)
+            op_type = "+"
+
+        return EvalResult(
+            value=total_val,
+            rendered=rendered,
+            op_type=op_type,
+        )
+
     def _eval_percent(
+
         self,
         node: PercentNode,
     ) -> EvalResult:

@@ -11,7 +11,9 @@ from .nodes import (
     UnaryOpNode,
     BinaryOpNode,
     PercentNode,
+    RepeatNode,
 )
+
 from .tokenizer import Tokenizer
 from .parser import Parser
 from .evaluator import format_op
@@ -134,6 +136,14 @@ class Renderer:
             new_operand, changed = self._find_and_reduce(node.operand)
             return PercentNode(new_operand), changed
 
+        if isinstance(node, RepeatNode):
+            if isinstance(node.operand, NumberNode):
+                return NumberNode(node.operand.value * node.count), True
+
+            new_operand, changed = self._find_and_reduce(node.operand)
+            return RepeatNode(new_operand, node.count), changed
+
+
         return node, False
 
     # --------------------
@@ -203,5 +213,8 @@ class Renderer:
 
         if isinstance(node, PercentNode):
             return self._to_string(node.operand) + "%"
+
+        if isinstance(node, RepeatNode):
+            return f"({self._to_string(node.operand)})^{node.count}"
 
         return str(node)

@@ -37,3 +37,10 @@ class BinaryOpNode(ASTNode):
 class PercentNode(ASTNode):
     """후위 % (백분율) 노드 (예: 50% -> 0.5)"""
     operand: ASTNode
+
+
+@dataclass(slots=True)
+class RepeatNode(ASTNode):
+    """수식 반복 굴림 노드 (예: 3d6^5 -> 3d6을 5번 독립적으로 굴려 합산)"""
+    operand: ASTNode
+    count: int

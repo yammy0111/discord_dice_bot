@@ -9,7 +9,9 @@ from .nodes import (
     UnaryOpNode,
     BinaryOpNode,
     PercentNode,
+    RepeatNode,
 )
+
 
 from .tokenizer import (
     Token,
@@ -191,11 +193,19 @@ class Parser:
                 f"예상치 못한 토큰: {token.type.name}"
             )
 
-        # 후위 % (백분율) 연산자 처리
-        while self.current.type == TokenType.PERCENT:
-            self.advance()
-            node = PercentNode(operand=node)
-
-        
+        # 후위 % (백분율) 연산자 및 ^ (반복) 연산자 처리
+        while self.current.type in (TokenType.PERCENT, TokenType.CARET):
+            if self.current.type == TokenType.PERCENT:
+                self.advance()
+                node = PercentNode(operand=node)
+            elif self.current.type == TokenType.CARET:
+                self.advance()
+                count_token = self.consume(TokenType.NUMBER)
+                count_val = float(count_token.value) if "." in count_token.value else int(count_token.value)
+                if isinstance(count_val, float) and not count_val.is_integer():
+                    raise ParserError("반복 횟수는 정수여야 합니다.")
+                if int(count_val) <= 0:
+                    raise ParserError("반복 횟수는 1 이상이어야 합니다.")
+                node = RepeatNode(operand=node, count=int(count_val))
 
         return node
